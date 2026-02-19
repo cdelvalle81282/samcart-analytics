@@ -1,0 +1,379 @@
+"""SQLite cache for SamCart data with hybrid sync strategy."""
+
+import sqlite3
+from datetime import datetime, timedelta, timezone
+
+import pandas as pd
+import streamlit as st
+
+from samcart_api import SamCartClient, normalize_ts, safe_float
+
+
+class SamCartCache:
+    """Local SQLite cache with extracted columns only (no raw_json)."""
+
+    def __init__(self, db_path: str = "samcart_cache.db"):
+        self.db_path = db_path
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
+        self.conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
+        self._init_schema()
+
+    def _init_schema(self):
+        """Create tables and indexes if they don't exist."""
+        cur = self.conn.cursor()
+
+        cur.executescript("""
+            CREATE TABLE IF NOT EXISTS orders (
+                id TEXT PRIMARY KEY,
+                customer_email TEXT,
+                customer_id TEXT,
+                product_id TEXT,
+                product_name TEXT,
+                total REAL,
+                created_at TEXT,
+                subscription_id TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);
+            CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_email);
+            CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id);
+
+            CREATE TABLE IF NOT EXISTS customers (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                first_name TEXT,
+                last_name TEXT,
+                phone TEXT,
+                billing_city TEXT,
+                billing_state TEXT,
+                billing_country TEXT,
+                created_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);
+
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                id TEXT PRIMARY KEY,
+                customer_email TEXT,
+                product_id TEXT,
+                product_name TEXT,
+                status TEXT,
+                interval TEXT,
+                price REAL,
+                created_at TEXT,
+                canceled_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_subs_status ON subscriptions(status);
+            CREATE INDEX IF NOT EXISTS idx_subs_created ON subscriptions(created_at);
+
+            CREATE TABLE IF NOT EXISTS products (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                price REAL,
+                sku TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS charges (
+                id TEXT PRIMARY KEY,
+                order_id TEXT,
+                subscription_id TEXT,
+                customer_email TEXT,
+                amount REAL,
+                status TEXT,
+                created_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_charges_created ON charges(created_at);
+            CREATE INDEX IF NOT EXISTS idx_charges_customer ON charges(customer_email);
+
+            CREATE TABLE IF NOT EXISTS sync_meta (
+                table_name TEXT PRIMARY KEY,
+                last_synced_at TEXT,
+                record_count INTEGER
+            );
+        """)
+        self.conn.commit()
+
+    # ------------------------------------------------------------------
+    # Sync metadata
+    # ------------------------------------------------------------------
+
+    def get_last_sync(self, table_name: str) -> str | None:
+        """Returns last_synced_at ISO timestamp for incremental fetching."""
+        row = self.conn.execute(
+            "SELECT last_synced_at FROM sync_meta WHERE table_name = ?",
+            (table_name,),
+        ).fetchone()
+        return row[0] if row else None
+
+    def _update_sync_meta(self, table_name: str):
+        """Update sync_meta with current time and record count."""
+        count = self.conn.execute(
+            f"SELECT COUNT(*) FROM [{table_name}]"
+        ).fetchone()[0]
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.conn.execute(
+            "INSERT OR REPLACE INTO sync_meta (table_name, last_synced_at, record_count) VALUES (?, ?, ?)",
+            (table_name, now, count),
+        )
+        self.conn.commit()
+
+    def get_sync_summary(self) -> dict:
+        """Returns {table_name: {last_synced_at, record_count}} for sidebar display."""
+        rows = self.conn.execute(
+            "SELECT table_name, last_synced_at, record_count FROM sync_meta"
+        ).fetchall()
+        return {
+            row[0]: {"last_synced_at": row[1], "record_count": row[2]}
+            for row in rows
+        }
+
+    # ------------------------------------------------------------------
+    # Upsert helpers — extract only whitelisted fields
+    # ------------------------------------------------------------------
+
+    def _upsert_orders(self, orders: list[dict]):
+        """INSERT OR REPLACE orders, extracting only needed fields."""
+        for order in orders:
+            self.conn.execute(
+                """INSERT OR REPLACE INTO orders
+                   (id, customer_email, customer_id, product_id, product_name, total, created_at, subscription_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    str(order.get("id", "")),
+                    (order.get("customer", {}) or {}).get("email", order.get("customer_email", "")),
+                    str((order.get("customer", {}) or {}).get("id", order.get("customer_id", ""))),
+                    str(order.get("product_id", (order.get("product", {}) or {}).get("id", ""))),
+                    order.get("product_name", (order.get("product", {}) or {}).get("name", "")),
+                    safe_float(order.get("total")),
+                    normalize_ts(order.get("created_at")),
+                    str(order.get("subscription_id", "") or ""),
+                ),
+            )
+
+    def _upsert_customers(self, customers: list[dict]):
+        """INSERT OR REPLACE customers with PII minimization."""
+        for c in customers:
+            billing = c.get("billing_address", {}) or {}
+            self.conn.execute(
+                """INSERT OR REPLACE INTO customers
+                   (id, email, first_name, last_name, phone, billing_city, billing_state, billing_country, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    str(c.get("id", "")),
+                    c.get("email", ""),
+                    c.get("first_name", ""),
+                    c.get("last_name", ""),
+                    c.get("phone", ""),
+                    billing.get("city", ""),
+                    billing.get("state", ""),
+                    billing.get("country", ""),
+                    normalize_ts(c.get("created_at")),
+                ),
+            )
+
+    def _upsert_subscriptions(self, subs: list[dict]):
+        """INSERT OR REPLACE subscriptions."""
+        for s in subs:
+            self.conn.execute(
+                """INSERT OR REPLACE INTO subscriptions
+                   (id, customer_email, product_id, product_name, status, interval, price, created_at, canceled_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    str(s.get("id", "")),
+                    (s.get("customer", {}) or {}).get("email", s.get("customer_email", "")),
+                    str(s.get("product_id", (s.get("product", {}) or {}).get("id", ""))),
+                    s.get("product_name", (s.get("product", {}) or {}).get("name", "")),
+                    s.get("status", ""),
+                    s.get("interval", s.get("billing_interval", "")),
+                    safe_float(s.get("price", s.get("amount"))),
+                    normalize_ts(s.get("created_at")),
+                    normalize_ts(s.get("canceled_at")),
+                ),
+            )
+
+    def _upsert_products(self, products: list[dict]):
+        """INSERT OR REPLACE products."""
+        for p in products:
+            self.conn.execute(
+                """INSERT OR REPLACE INTO products (id, name, price, sku) VALUES (?, ?, ?, ?)""",
+                (
+                    str(p.get("id", "")),
+                    p.get("name", ""),
+                    safe_float(p.get("price")),
+                    p.get("sku", ""),
+                ),
+            )
+
+    def _upsert_charges(self, charges: list[dict]):
+        """INSERT OR REPLACE charges."""
+        for ch in charges:
+            self.conn.execute(
+                """INSERT OR REPLACE INTO charges
+                   (id, order_id, subscription_id, customer_email, amount, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    str(ch.get("id", "")),
+                    str(ch.get("order_id", "") or ""),
+                    str(ch.get("subscription_id", "") or ""),
+                    (ch.get("customer", {}) or {}).get("email", ch.get("customer_email", "")),
+                    safe_float(ch.get("amount", ch.get("total"))),
+                    ch.get("status", ""),
+                    normalize_ts(ch.get("created_at")),
+                ),
+            )
+
+    # ------------------------------------------------------------------
+    # Sync engine — hybrid strategy
+    # ------------------------------------------------------------------
+
+    def _sync_table(
+        self,
+        table_name: str,
+        fetcher,
+        upserter,
+        since: str | None = None,
+        force_full: bool = False,
+        progress_text: str = "",
+    ):
+        """Sync a single table: fetch from API, upsert into SQLite, update meta."""
+        if force_full:
+            self.conn.execute(f"DELETE FROM [{table_name}]")
+            self.conn.commit()
+            since = None
+
+        if progress_text:
+            st.text(progress_text)
+
+        if since is not None:
+            records = fetcher(since=since)
+        else:
+            # fetcher might not accept since kwarg (e.g. get_products)
+            try:
+                records = fetcher(since=since)
+            except TypeError:
+                records = fetcher()
+
+        if records:
+            # Commit per batch for crash safety
+            batch_size = 100
+            for i in range(0, len(records), batch_size):
+                upserter(records[i : i + batch_size])
+                self.conn.commit()
+
+        self._update_sync_meta(table_name)
+        return len(records) if records else 0
+
+    def sync_all(self, client: SamCartClient, force_full: bool = False):
+        """
+        Hybrid sync strategy:
+        - products: always full (small table)
+        - subscriptions: always full (status is mutable)
+        - orders, customers, charges: incremental unless force_full
+
+        Incremental uses a 1-hour overlap window + UPSERT to catch boundary records.
+        """
+        progress = st.progress(0, text="Starting sync...")
+        total_records = 0
+
+        # Products: always full (small table)
+        progress.progress(0.1, text="Syncing products...")
+        n = self._sync_table("products", client.get_products, self._upsert_products, force_full=True)
+        total_records += n
+
+        # Subscriptions: ALWAYS full sync — status is mutable
+        progress.progress(0.3, text="Syncing subscriptions...")
+        n = self._sync_table("subscriptions", client.get_subscriptions, self._upsert_subscriptions, force_full=True)
+        total_records += n
+
+        # Orders, customers, charges: incremental with 1-hour overlap
+        incremental_tables = [
+            ("orders", client.get_orders, self._upsert_orders, 0.5),
+            ("customers", client.get_customers, self._upsert_customers, 0.7),
+            ("charges", client.get_charges, self._upsert_charges, 0.9),
+        ]
+
+        for table_name, fetcher, upserter, pct in incremental_tables:
+            progress.progress(pct, text=f"Syncing {table_name}...")
+            since = None
+            if not force_full:
+                last_sync = self.get_last_sync(table_name)
+                if last_sync:
+                    # 1-hour overlap window for boundary records
+                    dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
+                    since = (dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            n = self._sync_table(table_name, fetcher, upserter, since=since, force_full=force_full)
+            total_records += n
+
+        progress.progress(1.0, text="Sync complete!")
+        return total_records
+
+    # ------------------------------------------------------------------
+    # Query helpers — return DataFrames
+    # ------------------------------------------------------------------
+
+    def get_orders_df(self) -> pd.DataFrame:
+        return pd.read_sql_query("SELECT * FROM orders ORDER BY created_at DESC", self.conn)
+
+    def get_subscriptions_df(self) -> pd.DataFrame:
+        return pd.read_sql_query("SELECT * FROM subscriptions ORDER BY created_at DESC", self.conn)
+
+    def get_customers_df(self) -> pd.DataFrame:
+        return pd.read_sql_query("SELECT * FROM customers ORDER BY created_at DESC", self.conn)
+
+    def get_charges_df(self) -> pd.DataFrame:
+        return pd.read_sql_query("SELECT * FROM charges ORDER BY created_at DESC", self.conn)
+
+    def get_products_df(self) -> pd.DataFrame:
+        return pd.read_sql_query("SELECT * FROM products ORDER BY name", self.conn)
+
+    def search_customers(self, query: str) -> pd.DataFrame:
+        """Search customers by email or name. Uses parameterized LIKE."""
+        pattern = f"%{query}%"
+        return pd.read_sql_query(
+            """SELECT * FROM customers
+               WHERE email LIKE ? OR first_name LIKE ? OR last_name LIKE ?
+               ORDER BY created_at DESC LIMIT 100""",
+            self.conn,
+            params=(pattern, pattern, pattern),
+        )
+
+    def get_customer_orders(self, email: str) -> pd.DataFrame:
+        return pd.read_sql_query(
+            "SELECT * FROM orders WHERE customer_email = ? ORDER BY created_at DESC",
+            self.conn,
+            params=(email,),
+        )
+
+    def get_customer_subscriptions(self, email: str) -> pd.DataFrame:
+        return pd.read_sql_query(
+            "SELECT * FROM subscriptions WHERE customer_email = ? ORDER BY created_at DESC",
+            self.conn,
+            params=(email,),
+        )
+
+    def get_customer_charges(self, email: str) -> pd.DataFrame:
+        return pd.read_sql_query(
+            "SELECT * FROM charges WHERE customer_email = ? ORDER BY created_at DESC",
+            self.conn,
+            params=(email,),
+        )
+
+    # ------------------------------------------------------------------
+    # GDPR / CCPA deletion
+    # ------------------------------------------------------------------
+
+    def delete_customer_data(self, email: str) -> dict[str, int]:
+        """Delete all data for a customer by email across all tables. Returns counts."""
+        counts = {}
+        for table, col in [
+            ("orders", "customer_email"),
+            ("customers", "email"),
+            ("subscriptions", "customer_email"),
+            ("charges", "customer_email"),
+        ]:
+            cur = self.conn.execute(
+                f"DELETE FROM [{table}] WHERE [{col}] = ?", (email,)
+            )
+            counts[table] = cur.rowcount
+        self.conn.commit()
+        return counts
