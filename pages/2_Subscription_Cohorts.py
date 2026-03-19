@@ -5,6 +5,7 @@ import streamlit as st
 
 from analytics import build_cohort_retention
 from export import render_export_buttons
+from methodology import API_DATA_DICTIONARY, COHORT_RETENTION_METHODOLOGY
 
 from shared import get_cache
 
@@ -130,3 +131,14 @@ if st.checkbox("Show raw retention table"):
     display_df.insert(0, "Cohort Size", display_df.pop("cohort_size"))
     st.dataframe(display_df, use_container_width=True)
     render_export_buttons(display_df.reset_index(), "cohort_retention", key_prefix="cohort")
+
+# ------------------------------------------------------------------
+# Documentation tabs
+# ------------------------------------------------------------------
+
+st.markdown("---")
+doc_tab1, doc_tab2 = st.tabs(["How It's Calculated", "Available Data Points"])
+with doc_tab1:
+    st.markdown(COHORT_RETENTION_METHODOLOGY)
+with doc_tab2:
+    st.markdown(API_DATA_DICTIONARY)

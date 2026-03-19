@@ -5,6 +5,7 @@ import streamlit as st
 
 from analytics import monthly_revenue_summary
 from export import cleanup_old_exports
+from methodology import API_DATA_DICTIONARY, DASHBOARD_METHODOLOGY
 from samcart_api import SamCartAPIError
 from shared import get_cache, get_client
 
@@ -172,3 +173,14 @@ if not orders_df.empty:
     display_cols = ["created_at", "customer_email", "product_name", "total"]
     available_cols = [c for c in display_cols if c in orders_df.columns]
     st.dataframe(orders_df[available_cols].head(20), use_container_width=True)
+
+# ------------------------------------------------------------------
+# Documentation tabs
+# ------------------------------------------------------------------
+
+st.markdown("---")
+doc_tab1, doc_tab2 = st.tabs(["How It's Calculated", "Available Data Points"])
+with doc_tab1:
+    st.markdown(DASHBOARD_METHODOLOGY)
+with doc_tab2:
+    st.markdown(API_DATA_DICTIONARY)

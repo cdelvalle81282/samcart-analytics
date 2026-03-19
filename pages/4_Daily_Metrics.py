@@ -10,6 +10,7 @@ from analytics import (
     new_customer_ltv_by_entry_product,
 )
 from export import render_export_buttons
+from methodology import API_DATA_DICTIONARY, DAILY_METRICS_METHODOLOGY
 from shared import get_cache
 
 st.set_page_config(page_title="Daily Metrics", page_icon=":chart_with_upwards_trend:", layout="wide")
@@ -284,3 +285,14 @@ if sheets_config and sheets_config.get("spreadsheet_id"):
             st.error(f"Upload failed: {e}")
 else:
     st.caption("Google Sheets not configured. Add `[gsheets]` section to `.streamlit/secrets.toml` to enable.")
+
+# ------------------------------------------------------------------
+# Documentation tabs
+# ------------------------------------------------------------------
+
+st.markdown("---")
+doc_tab1, doc_tab2 = st.tabs(["How It's Calculated", "Available Data Points"])
+with doc_tab1:
+    st.markdown(DAILY_METRICS_METHODOLOGY)
+with doc_tab2:
+    st.markdown(API_DATA_DICTIONARY)

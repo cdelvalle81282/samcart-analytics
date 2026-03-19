@@ -4,6 +4,7 @@ import streamlit as st
 
 from analytics import calculate_customer_ltv
 from export import render_export_buttons
+from methodology import API_DATA_DICTIONARY, CUSTOMER_LOOKUP_METHODOLOGY
 
 from shared import get_cache
 
@@ -112,3 +113,14 @@ else:
     if not ltv_df.empty:
         st.dataframe(ltv_df.head(50), use_container_width=True)
         render_export_buttons(ltv_df, "customer_ltv", key_prefix="all_ltv")
+
+# ------------------------------------------------------------------
+# Documentation tabs
+# ------------------------------------------------------------------
+
+st.markdown("---")
+doc_tab1, doc_tab2 = st.tabs(["How It's Calculated", "Available Data Points"])
+with doc_tab1:
+    st.markdown(CUSTOMER_LOOKUP_METHODOLOGY)
+with doc_tab2:
+    st.markdown(API_DATA_DICTIONARY)

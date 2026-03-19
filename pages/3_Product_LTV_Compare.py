@@ -6,6 +6,7 @@ import streamlit as st
 
 from analytics import product_ltv_ranking
 from export import render_export_buttons
+from methodology import API_DATA_DICTIONARY, PRODUCT_LTV_METHODOLOGY
 
 from shared import get_cache
 
@@ -130,3 +131,14 @@ st.dataframe(
 )
 
 render_export_buttons(ranking, "product_ltv", key_prefix="product")
+
+# ------------------------------------------------------------------
+# Documentation tabs
+# ------------------------------------------------------------------
+
+st.markdown("---")
+doc_tab1, doc_tab2 = st.tabs(["How It's Calculated", "Available Data Points"])
+with doc_tab1:
+    st.markdown(PRODUCT_LTV_METHODOLOGY)
+with doc_tab2:
+    st.markdown(API_DATA_DICTIONARY)
