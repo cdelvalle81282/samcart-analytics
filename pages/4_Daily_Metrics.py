@@ -1,6 +1,6 @@
 """Report 4: Daily Metrics — new customers, sales, refunds, renewals by product."""
 
-from datetime import date, timedelta
+from datetime import timedelta
 
 import plotly.express as px
 import streamlit as st

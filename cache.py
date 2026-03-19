@@ -166,7 +166,7 @@ class SamCartCache:
                     customer_id,
                     product_id,
                     product_name,
-                    safe_float(order.get("total")),
+                    safe_float(order.get("total")) / 100,
                     normalize_ts(order.get("order_date") or order.get("created_at")),
                     subscription_id,
                 ),
@@ -209,7 +209,7 @@ class SamCartCache:
 
             # Price is nested in recurring_price
             recurring_price = s.get("recurring_price") or {}
-            price = safe_float(recurring_price.get("total", s.get("price")))
+            price = safe_float(recurring_price.get("total", s.get("price"))) / 100
 
             # canceled_at maps to end_date when status is canceled
             canceled_at = s.get("end_date") if s.get("status") == "canceled" else None
@@ -239,7 +239,7 @@ class SamCartCache:
                 (
                     str(p.get("id", "")),
                     p.get("product_name", p.get("name", "")),
-                    safe_float(p.get("price")),
+                    safe_float(p.get("price")) / 100,
                     p.get("sku", ""),
                 ),
             )
@@ -260,7 +260,7 @@ class SamCartCache:
                     str(ch.get("order_id", "") or ""),
                     str(ch.get("subscription_rebill_id", "") or ""),
                     customer_email,
-                    safe_float(ch.get("total", ch.get("amount"))),
+                    safe_float(ch.get("total", ch.get("amount"))) / 100,
                     ch.get("charge_refund_status", ch.get("status", "")),
                     normalize_ts(ch.get("created_at")),
                 ),
@@ -279,6 +279,7 @@ class SamCartCache:
         force_full: bool = False,
         progress_text: str = "",
         customer_map: dict | None = None,
+        headless: bool = False,
     ):
         """Sync a single table: fetch from API, upsert into SQLite, update meta."""
         _validate_table(table_name)
@@ -288,7 +289,10 @@ class SamCartCache:
             since = None
 
         if progress_text:
-            st.text(progress_text)
+            if headless:
+                print(progress_text)
+            else:
+                st.text(progress_text)
 
         if since is not None:
             records = fetcher(since=since)
@@ -318,7 +322,7 @@ class SamCartCache:
         rows = self.conn.execute("SELECT id, email FROM customers").fetchall()
         return {str(row[0]): row[1] for row in rows}
 
-    def sync_all(self, client: SamCartClient, force_full: bool = False):
+    def sync_all(self, client: SamCartClient, force_full: bool = False, headless: bool = False):
         """
         Hybrid sync strategy:
         - products: always full (small table)
@@ -327,32 +331,45 @@ class SamCartCache:
         - orders, charges: incremental unless force_full
 
         Incremental uses a 1-hour overlap window + UPSERT to catch boundary records.
+        Set headless=True to run without Streamlit UI (e.g. from a CI cron job).
         """
-        progress = st.progress(0, text="Starting sync...")
+        if headless:
+            print("Starting sync...")
+        else:
+            progress = st.progress(0, text="Starting sync...")
         total_records = 0
 
         # Products: always full (small table)
-        progress.progress(0.05, text="Syncing products...")
-        recs = self._sync_table("products", client.get_products, self._upsert_products, force_full=True)
+        if headless:
+            print("Syncing products...")
+        else:
+            progress.progress(0.05, text="Syncing products...")
+        recs = self._sync_table("products", client.get_products, self._upsert_products, force_full=True, headless=headless)
         total_records += len(recs)
 
         # Customers FIRST — needed to map customer_id -> email for other tables
-        progress.progress(0.15, text="Syncing customers...")
+        if headless:
+            print("Syncing customers...")
+        else:
+            progress.progress(0.15, text="Syncing customers...")
         since = None
         if not force_full:
             last_sync = self.get_last_sync("customers")
             if last_sync:
                 dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
                 since = (dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        recs = self._sync_table("customers", client.get_customers, self._upsert_customers, since=since, force_full=force_full)
+        recs = self._sync_table("customers", client.get_customers, self._upsert_customers, since=since, force_full=force_full, headless=headless)
         total_records += len(recs)
 
         # Build customer_id -> email map from the cache
         customer_map = self._build_customer_map()
 
         # Subscriptions: ALWAYS full sync — status is mutable
-        progress.progress(0.35, text="Syncing subscriptions...")
-        recs = self._sync_table("subscriptions", client.get_subscriptions, self._upsert_subscriptions, force_full=True, customer_map=customer_map)
+        if headless:
+            print("Syncing subscriptions...")
+        else:
+            progress.progress(0.35, text="Syncing subscriptions...")
+        recs = self._sync_table("subscriptions", client.get_subscriptions, self._upsert_subscriptions, force_full=True, customer_map=customer_map, headless=headless)
         total_records += len(recs)
 
         # Orders & charges: incremental with 1-hour overlap
@@ -362,17 +379,23 @@ class SamCartCache:
         ]
 
         for table_name, fetcher, upserter, pct in incremental_tables:
-            progress.progress(pct, text=f"Syncing {table_name}...")
+            if headless:
+                print(f"Syncing {table_name}...")
+            else:
+                progress.progress(pct, text=f"Syncing {table_name}...")
             since = None
             if not force_full:
                 last_sync = self.get_last_sync(table_name)
                 if last_sync:
                     dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
                     since = (dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            recs = self._sync_table(table_name, fetcher, upserter, since=since, force_full=force_full, customer_map=customer_map)
+            recs = self._sync_table(table_name, fetcher, upserter, since=since, force_full=force_full, customer_map=customer_map, headless=headless)
             total_records += len(recs)
 
-        progress.progress(1.0, text="Sync complete!")
+        if headless:
+            print("Sync complete!")
+        else:
+            progress.progress(1.0, text="Sync complete!")
         return total_records
 
     # ------------------------------------------------------------------

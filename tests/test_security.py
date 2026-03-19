@@ -130,7 +130,6 @@ class TestAuthGate:
 class TestFilenameSanitization:
     def test_email_in_filename_is_stripped(self):
         """render_export_buttons should not use email in download filenames."""
-        from export import render_export_buttons
 
         # We test the guardrail logic directly: if "@" is in filename_base, it becomes "export"
         # Simulate by checking that the function would sanitize
@@ -153,7 +152,6 @@ class TestFilenameSanitization:
 
     def test_customer_lookup_uses_clean_filename(self):
         """Verify the call site in Customer Lookup uses non-PII filename."""
-        import ast
 
         with open("pages/1_Customer_Lookup.py") as f:
             source = f.read()

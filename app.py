@@ -36,8 +36,8 @@ else:
             st.sidebar.success("Connected to SamCart", icon=":white_check_mark:")
         else:
             st.sidebar.error("Invalid API key")
-    except Exception:
-        st.sidebar.warning("Could not verify API key")
+    except Exception as e:
+        st.sidebar.warning(f"Could not verify API key: {type(e).__name__}: {e}")
 
 # Sync controls
 st.sidebar.markdown("---")
