@@ -131,29 +131,47 @@ class SamCartCache:
     # Upsert helpers — extract only whitelisted fields
     # ------------------------------------------------------------------
 
-    def _upsert_orders(self, orders: list[dict]):
+    def _upsert_orders(self, orders: list[dict], customer_map: dict | None = None):
         """INSERT OR REPLACE orders, extracting only needed fields."""
+        customer_map = customer_map or {}
         for order in orders:
+            customer_id = str(order.get("customer_id", ""))
+            customer_email = customer_map.get(customer_id, "")
+
+            # Product info is nested in cart_items; take first item
+            cart_items = order.get("cart_items") or []
+            first_item = cart_items[0] if cart_items else {}
+            product_id = str(first_item.get("product_id", ""))
+            product_name = first_item.get("product_name", "")
+            subscription_id = str(first_item.get("subscription_id", "") or "")
+
             self.conn.execute(
                 """INSERT OR REPLACE INTO orders
                    (id, customer_email, customer_id, product_id, product_name, total, created_at, subscription_id)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     str(order.get("id", "")),
-                    (order.get("customer", {}) or {}).get("email", order.get("customer_email", "")),
-                    str((order.get("customer", {}) or {}).get("id", order.get("customer_id", ""))),
-                    str(order.get("product_id", (order.get("product", {}) or {}).get("id", ""))),
-                    order.get("product_name", (order.get("product", {}) or {}).get("name", "")),
+                    customer_email,
+                    customer_id,
+                    product_id,
+                    product_name,
                     safe_float(order.get("total")),
-                    normalize_ts(order.get("created_at")),
-                    str(order.get("subscription_id", "") or ""),
+                    normalize_ts(order.get("order_date") or order.get("created_at")),
+                    subscription_id,
                 ),
             )
 
     def _upsert_customers(self, customers: list[dict]):
         """INSERT OR REPLACE customers with PII minimization."""
         for c in customers:
-            billing = c.get("billing_address", {}) or {}
+            # Billing address is in addresses array with type="billing"
+            addresses = c.get("addresses") or []
+            billing = {}
+            for addr in addresses:
+                if addr.get("type") == "billing":
+                    billing = addr
+                    break
+
             self.conn.execute(
                 """INSERT OR REPLACE INTO customers
                    (id, email, first_name, last_name, phone, billing_city, billing_state, billing_country, created_at)
@@ -171,23 +189,34 @@ class SamCartCache:
                 ),
             )
 
-    def _upsert_subscriptions(self, subs: list[dict]):
+    def _upsert_subscriptions(self, subs: list[dict], customer_map: dict | None = None):
         """INSERT OR REPLACE subscriptions."""
+        customer_map = customer_map or {}
         for s in subs:
+            customer_id = str(s.get("customer_id", ""))
+            customer_email = customer_map.get(customer_id, "")
+
+            # Price is nested in recurring_price
+            recurring_price = s.get("recurring_price") or {}
+            price = safe_float(recurring_price.get("total", s.get("price")))
+
+            # canceled_at maps to end_date when status is canceled
+            canceled_at = s.get("end_date") if s.get("status") == "canceled" else None
+
             self.conn.execute(
                 """INSERT OR REPLACE INTO subscriptions
                    (id, customer_email, product_id, product_name, status, interval, price, created_at, canceled_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     str(s.get("id", "")),
-                    (s.get("customer", {}) or {}).get("email", s.get("customer_email", "")),
-                    str(s.get("product_id", (s.get("product", {}) or {}).get("id", ""))),
-                    s.get("product_name", (s.get("product", {}) or {}).get("name", "")),
+                    customer_email,
+                    str(s.get("product_id", "")),
+                    s.get("product_name", ""),
                     s.get("status", ""),
-                    s.get("interval", s.get("billing_interval", "")),
-                    safe_float(s.get("price", s.get("amount"))),
+                    s.get("subscription_interval", ""),
+                    price,
                     normalize_ts(s.get("created_at")),
-                    normalize_ts(s.get("canceled_at")),
+                    normalize_ts(canceled_at),
                 ),
             )
 
@@ -198,15 +227,19 @@ class SamCartCache:
                 """INSERT OR REPLACE INTO products (id, name, price, sku) VALUES (?, ?, ?, ?)""",
                 (
                     str(p.get("id", "")),
-                    p.get("name", ""),
+                    p.get("product_name", p.get("name", "")),
                     safe_float(p.get("price")),
                     p.get("sku", ""),
                 ),
             )
 
-    def _upsert_charges(self, charges: list[dict]):
+    def _upsert_charges(self, charges: list[dict], customer_map: dict | None = None):
         """INSERT OR REPLACE charges."""
+        customer_map = customer_map or {}
         for ch in charges:
+            customer_id = str(ch.get("customer_id", ""))
+            customer_email = customer_map.get(customer_id, "")
+
             self.conn.execute(
                 """INSERT OR REPLACE INTO charges
                    (id, order_id, subscription_id, customer_email, amount, status, created_at)
@@ -214,10 +247,10 @@ class SamCartCache:
                 (
                     str(ch.get("id", "")),
                     str(ch.get("order_id", "") or ""),
-                    str(ch.get("subscription_id", "") or ""),
-                    (ch.get("customer", {}) or {}).get("email", ch.get("customer_email", "")),
-                    safe_float(ch.get("amount", ch.get("total"))),
-                    ch.get("status", ""),
+                    str(ch.get("subscription_rebill_id", "") or ""),
+                    customer_email,
+                    safe_float(ch.get("total", ch.get("amount"))),
+                    ch.get("charge_refund_status", ch.get("status", "")),
                     normalize_ts(ch.get("created_at")),
                 ),
             )
@@ -234,6 +267,7 @@ class SamCartCache:
         since: str | None = None,
         force_full: bool = False,
         progress_text: str = "",
+        customer_map: dict | None = None,
     ):
         """Sync a single table: fetch from API, upsert into SQLite, update meta."""
         if force_full:
@@ -257,18 +291,28 @@ class SamCartCache:
             # Commit per batch for crash safety
             batch_size = 100
             for i in range(0, len(records), batch_size):
-                upserter(records[i : i + batch_size])
+                batch = records[i : i + batch_size]
+                if customer_map is not None:
+                    upserter(batch, customer_map=customer_map)
+                else:
+                    upserter(batch)
                 self.conn.commit()
 
         self._update_sync_meta(table_name)
-        return len(records) if records else 0
+        return records or []
+
+    def _build_customer_map(self) -> dict:
+        """Build customer_id -> email lookup from the customers table."""
+        rows = self.conn.execute("SELECT id, email FROM customers").fetchall()
+        return {str(row[0]): row[1] for row in rows}
 
     def sync_all(self, client: SamCartClient, force_full: bool = False):
         """
         Hybrid sync strategy:
         - products: always full (small table)
+        - customers: sync first to build id->email map
         - subscriptions: always full (status is mutable)
-        - orders, customers, charges: incremental unless force_full
+        - orders, charges: incremental unless force_full
 
         Incremental uses a 1-hour overlap window + UPSERT to catch boundary records.
         """
@@ -276,20 +320,33 @@ class SamCartCache:
         total_records = 0
 
         # Products: always full (small table)
-        progress.progress(0.1, text="Syncing products...")
-        n = self._sync_table("products", client.get_products, self._upsert_products, force_full=True)
-        total_records += n
+        progress.progress(0.05, text="Syncing products...")
+        recs = self._sync_table("products", client.get_products, self._upsert_products, force_full=True)
+        total_records += len(recs)
+
+        # Customers FIRST — needed to map customer_id -> email for other tables
+        progress.progress(0.15, text="Syncing customers...")
+        since = None
+        if not force_full:
+            last_sync = self.get_last_sync("customers")
+            if last_sync:
+                dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
+                since = (dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        recs = self._sync_table("customers", client.get_customers, self._upsert_customers, since=since, force_full=force_full)
+        total_records += len(recs)
+
+        # Build customer_id -> email map from the cache
+        customer_map = self._build_customer_map()
 
         # Subscriptions: ALWAYS full sync — status is mutable
-        progress.progress(0.3, text="Syncing subscriptions...")
-        n = self._sync_table("subscriptions", client.get_subscriptions, self._upsert_subscriptions, force_full=True)
-        total_records += n
+        progress.progress(0.35, text="Syncing subscriptions...")
+        recs = self._sync_table("subscriptions", client.get_subscriptions, self._upsert_subscriptions, force_full=True, customer_map=customer_map)
+        total_records += len(recs)
 
-        # Orders, customers, charges: incremental with 1-hour overlap
+        # Orders & charges: incremental with 1-hour overlap
         incremental_tables = [
-            ("orders", client.get_orders, self._upsert_orders, 0.5),
-            ("customers", client.get_customers, self._upsert_customers, 0.7),
-            ("charges", client.get_charges, self._upsert_charges, 0.9),
+            ("orders", client.get_orders, self._upsert_orders, 0.6),
+            ("charges", client.get_charges, self._upsert_charges, 0.85),
         ]
 
         for table_name, fetcher, upserter, pct in incremental_tables:
@@ -298,11 +355,10 @@ class SamCartCache:
             if not force_full:
                 last_sync = self.get_last_sync(table_name)
                 if last_sync:
-                    # 1-hour overlap window for boundary records
                     dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
                     since = (dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            n = self._sync_table(table_name, fetcher, upserter, since=since, force_full=force_full)
-            total_records += n
+            recs = self._sync_table(table_name, fetcher, upserter, since=since, force_full=force_full, customer_map=customer_map)
+            total_records += len(recs)
 
         progress.progress(1.0, text="Sync complete!")
         return total_records

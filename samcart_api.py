@@ -2,6 +2,7 @@
 
 import time
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -55,7 +56,7 @@ class SamCartClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.session = requests.Session()
-        self.session.headers["Authorization"] = f"Bearer {api_key}"
+        self.session.headers["sc-api"] = api_key
         # SECURITY: Never set verify=False
         self.session.verify = True
 
@@ -107,29 +108,34 @@ class SamCartClient:
         raise SamCartAPIError(429, "Rate limit exceeded after max retries")
 
     def _paginate(self, endpoint: str, params: dict | None = None) -> list[dict]:
-        """Fetch all pages from a paginated endpoint."""
+        """Fetch all pages from a cursor-based paginated endpoint."""
         params = dict(params or {})
         all_items = []
-        page = 1
 
+        # First request uses the endpoint + params
+        data = self._request(endpoint, params)
+        items = data.get("data", [])
+        if not items:
+            return all_items
+        all_items.extend(items)
+
+        # Follow cursor-based pagination via 'next' URL
         while True:
-            params["page"] = page
-            data = self._request(endpoint, params)
+            pagination = data.get("pagination", {})
+            next_url = pagination.get("next")
+            if not next_url:
+                break
 
-            # SamCart wraps results in a "data" key
+            # next_url is a full URL; extract path + query params
+            parsed = urlparse(next_url)
+            next_endpoint = parsed.path.replace("/v1/", "", 1)
+            next_params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+
+            data = self._request(next_endpoint, next_params)
             items = data.get("data", [])
             if not items:
                 break
-
             all_items.extend(items)
-
-            # Check pagination metadata
-            pagination = data.get("pagination", {})
-            total_pages = pagination.get("last_page", 1)
-            if page >= total_pages:
-                break
-
-            page += 1
 
         return all_items
 

@@ -122,7 +122,13 @@ if orders_df.empty and subs_df.empty:
 # Metric cards
 col1, col2, col3, col4 = st.columns(4)
 
-total_revenue = orders_df["total"].sum() if not orders_df.empty else 0
+if not charges_df.empty:
+    _successful = charges_df[charges_df["status"].str.lower().isin(
+        ["charged", "succeeded", "paid", "complete"]
+    )]
+    total_revenue = _successful["amount"].sum()
+else:
+    total_revenue = orders_df["total"].sum() if not orders_df.empty else 0
 total_customers = customers_df["id"].nunique() if not customers_df.empty else 0
 active_subs = (
     subs_df[subs_df["status"].str.lower() == "active"]["id"].nunique()
@@ -145,7 +151,7 @@ if not subs_df.empty:
 
 # Monthly revenue chart
 st.subheader("Monthly Revenue")
-monthly = monthly_revenue_summary(orders_df)
+monthly = monthly_revenue_summary(orders_df, charges_df)
 if not monthly.empty:
     fig = px.bar(
         monthly,

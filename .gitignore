@@ -1,7 +1,10 @@
 .streamlit/secrets.toml
 *.db
+*.db-shm
+*.db-wal
 exports/
 .env
 __pycache__/
 *.pyc
 .ruff_cache/
+.claude/
