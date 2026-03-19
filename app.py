@@ -124,9 +124,8 @@ if orders_df.empty and subs_df.empty:
 col1, col2, col3, col4 = st.columns(4)
 
 if not charges_df.empty:
-    _successful = charges_df[charges_df["status"].str.lower().isin(
-        ["charged", "succeeded", "paid", "complete"]
-    )]
+    from analytics import _is_successful_charge
+    _successful = charges_df[_is_successful_charge(charges_df["status"])]
     total_revenue = _successful["amount"].sum()
 else:
     total_revenue = orders_df["total"].sum() if not orders_df.empty else 0

@@ -5,8 +5,21 @@ from datetime import datetime, timezone
 import pandas as pd
 
 # Charge status constants
+# Note: SamCart API leaves status NULL for successful charges.
+# Only refunds get an explicit status value.
 SUCCESSFUL_CHARGE_STATUSES = {"charged", "succeeded", "paid", "complete"}
 REFUND_CHARGE_STATUSES = {"refunded", "partially_refunded", "refund"}
+
+
+def _is_successful_charge(status_series: pd.Series) -> pd.Series:
+    """A charge is successful if status is NULL/empty OR in the whitelist."""
+    lower = status_series.str.lower()
+    return lower.isna() | (lower == "") | lower.isin(SUCCESSFUL_CHARGE_STATUSES)
+
+
+def _is_refund_charge(status_series: pd.Series) -> pd.Series:
+    """A charge is a refund if status is in the refund set."""
+    return status_series.str.lower().isin(REFUND_CHARGE_STATUSES)
 
 
 def calculate_customer_ltv(
@@ -32,7 +45,7 @@ def calculate_customer_ltv(
     # Total spend from successful charges only
     if not charges_df.empty:
         valid_charges = charges_df[
-            charges_df["status"].str.lower().isin(["charged", "succeeded", "paid", "complete"])
+            _is_successful_charge(charges_df["status"])
         ].copy()
         if not valid_charges.empty:
             spend = (
@@ -259,7 +272,7 @@ def monthly_revenue_summary(
     # Revenue from successful charges (source of truth)
     if charges_df is not None and not charges_df.empty:
         cdf = charges_df.copy()
-        cdf = cdf[cdf["status"].str.lower().isin(SUCCESSFUL_CHARGE_STATUSES)]
+        cdf = cdf[_is_successful_charge(cdf["status"])]
         cdf["created_at"] = pd.to_datetime(cdf["created_at"], errors="coerce")
         cdf = cdf.dropna(subset=["created_at"])
         if not cdf.empty:
@@ -435,7 +448,7 @@ def daily_new_sales(
         return pd.DataFrame(columns=cols)
 
     df = charges_df.copy()
-    df = df[df["status"].str.lower().isin(SUCCESSFUL_CHARGE_STATUSES)]
+    df = df[_is_successful_charge(df["status"])]
     if df.empty:
         return pd.DataFrame(columns=cols)
 
@@ -474,7 +487,7 @@ def daily_refunds(
         return pd.DataFrame(columns=cols)
 
     df = charges_df.copy()
-    df = df[df["status"].str.lower().isin(REFUND_CHARGE_STATUSES)]
+    df = df[_is_refund_charge(df["status"])]
     if df.empty:
         return pd.DataFrame(columns=cols)
 
@@ -506,7 +519,7 @@ def daily_renewals(
         return pd.DataFrame(columns=cols)
 
     df = charges_df.copy()
-    df = df[df["status"].str.lower().isin(SUCCESSFUL_CHARGE_STATUSES)]
+    df = df[_is_successful_charge(df["status"])]
     if df.empty:
         return pd.DataFrame(columns=cols)
 
@@ -615,7 +628,7 @@ def new_customer_ltv_by_entry_product(
 
     # Total spend per customer from successful charges
     if not charges_df.empty:
-        valid = charges_df[charges_df["status"].str.lower().isin(SUCCESSFUL_CHARGE_STATUSES)].copy()
+        valid = charges_df[_is_successful_charge(charges_df["status"])].copy()
         if not valid.empty:
             spend = (
                 valid.groupby("customer_email")["amount"]

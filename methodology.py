@@ -8,9 +8,10 @@ DASHBOARD_METHODOLOGY = """
 ### How Metrics Are Calculated
 
 **Total Revenue**
-- Source: `charges` table filtered to successful statuses (`charged`, `succeeded`, `paid`, `complete`)
+- Source: `charges` table filtered to successful charges
+- A charge is successful if its status is NULL/empty (SamCart default) or in (`charged`, `succeeded`, `paid`, `complete`)
 - Sums the `amount` field from successful charges only
-- Excludes refunded, failed, and pending charges
+- Excludes refunded and partially_refunded charges
 - Falls back to `orders.total` if no charges data is available
 
 **Total Customers**
@@ -117,7 +118,7 @@ DAILY_METRICS_METHODOLOGY = """
 - A customer is only new-to-file once, on the day of their first-ever order
 
 **New Sales**
-- Source: `charges` table filtered to successful statuses (`charged`, `succeeded`, `paid`, `complete`)
+- Source: `charges` table filtered to successful charges (status is NULL/empty or in `charged`, `succeeded`, `paid`, `complete`)
 - Enriched with product info by joining to `orders` (via `order_id`) and `subscriptions` (via `subscription_id`)
 - Excludes renewals: for each `subscription_id`, charges are ranked by date — only rank 1 (initial purchase) is kept
 - One-time charges (no `subscription_id`) are always counted as new sales
@@ -131,7 +132,7 @@ DAILY_METRICS_METHODOLOGY = """
 - `refund_amount`: sum of refund charge amounts
 
 **Renewals**
-- Source: `charges` table filtered to successful statuses with a non-empty `subscription_id`
+- Source: `charges` table filtered to successful charges (status NULL/empty or whitelisted) with a non-empty `subscription_id`
 - For each subscription, charges are ranked by date — only rank > 1 (subsequent charges) are renewals
 - `renewal_count`: number of renewal charges
 - `renewal_revenue`: sum of renewal charge amounts
@@ -253,6 +254,7 @@ The dashboard syncs data from the [SamCart v1 REST API](https://api.samcart.com/
 
 | Status | Category | Description |
 |--------|----------|-------------|
+| `NULL` / empty | Successful | Default for successful charges (most common) |
 | `charged` | Successful | Payment captured |
 | `succeeded` | Successful | Payment succeeded |
 | `paid` | Successful | Payment completed |
