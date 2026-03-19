@@ -10,7 +10,7 @@ import streamlit as st
 EXPORTS_DIR = Path("exports")
 
 # Columns considered PII — excluded by default
-PII_COLUMNS = {"phone", "billing_city", "billing_state", "billing_country", "email", "customer_email"}
+PII_COLUMNS = {"phone", "billing_city", "billing_state", "billing_country", "email", "customer_email", "first_name", "last_name"}
 
 
 def _ensure_exports_dir():
@@ -58,15 +58,6 @@ def export_to_csv(df: pd.DataFrame, include_pii: bool = False) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
-def save_export_file(data: bytes, filename: str):
-    """Save export to the exports/ directory with timestamp prefix."""
-    _ensure_exports_dir()
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    path = EXPORTS_DIR / f"{ts}_{filename}"
-    path.write_bytes(data)
-    return path
-
-
 def cleanup_old_exports(max_age_days: int = 7) -> int:
     """Delete export files older than max_age_days. Returns count deleted."""
     if not EXPORTS_DIR.exists():
@@ -86,6 +77,10 @@ def render_export_buttons(df: pd.DataFrame, filename_base: str, key_prefix: str 
     """Render download buttons for Excel and CSV with optional PII toggle."""
     if df.empty:
         return
+
+    # Defense-in-depth: strip anything that looks like PII from filename
+    if "@" in filename_base:
+        filename_base = "export"
 
     col1, col2, col3 = st.columns([1, 1, 1])
 

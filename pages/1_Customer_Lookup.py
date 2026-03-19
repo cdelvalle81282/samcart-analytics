@@ -3,6 +3,7 @@
 import streamlit as st
 
 from analytics import calculate_customer_ltv
+from auth import require_auth
 from export import render_export_buttons
 from methodology import API_DATA_DICTIONARY, CUSTOMER_LOOKUP_METHODOLOGY
 
@@ -10,6 +11,7 @@ from shared import get_cache
 
 st.set_page_config(page_title="Customer Lookup", page_icon=":bust_in_silhouette:", layout="wide")
 
+require_auth()
 
 st.title("Customer Lookup")
 
@@ -86,7 +88,7 @@ if query:
             cust_orders = cache.get_customer_orders(selected_email)
             if not cust_orders.empty:
                 st.dataframe(cust_orders, use_container_width=True)
-                render_export_buttons(cust_orders, f"orders_{selected_email}", key_prefix="cust_orders")
+                render_export_buttons(cust_orders, "customer_orders", key_prefix="cust_orders")
             else:
                 st.info("No orders found.")
 

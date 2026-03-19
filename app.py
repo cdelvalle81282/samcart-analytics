@@ -4,6 +4,7 @@ import plotly.express as px
 import streamlit as st
 
 from analytics import monthly_revenue_summary
+from auth import require_auth
 from export import cleanup_old_exports
 from methodology import API_DATA_DICTIONARY, DASHBOARD_METHODOLOGY
 from samcart_api import SamCartAPIError
@@ -15,6 +16,7 @@ st.set_page_config(
     layout="wide",
 )
 
+require_auth()
 
 # ------------------------------------------------------------------
 # Sidebar — sync controls

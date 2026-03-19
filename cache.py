@@ -9,6 +9,16 @@ import streamlit as st
 from samcart_api import SamCartClient, normalize_ts, safe_float
 
 
+_ALLOWED_TABLES = frozenset({"orders", "customers", "subscriptions", "charges", "products", "sync_meta"})
+
+
+def _validate_table(table_name: str) -> str:
+    """Validate table name against whitelist to prevent SQL injection."""
+    if table_name not in _ALLOWED_TABLES:
+        raise ValueError(f"Invalid table name: {table_name}")
+    return table_name
+
+
 class SamCartCache:
     """Local SQLite cache with extracted columns only (no raw_json)."""
 
@@ -107,6 +117,7 @@ class SamCartCache:
 
     def _update_sync_meta(self, table_name: str):
         """Update sync_meta with current time and record count."""
+        _validate_table(table_name)
         count = self.conn.execute(
             f"SELECT COUNT(*) FROM [{table_name}]"
         ).fetchone()[0]
@@ -270,6 +281,7 @@ class SamCartCache:
         customer_map: dict | None = None,
     ):
         """Sync a single table: fetch from API, upsert into SQLite, update meta."""
+        _validate_table(table_name)
         if force_full:
             self.conn.execute(f"DELETE FROM [{table_name}]")
             self.conn.commit()
@@ -383,11 +395,15 @@ class SamCartCache:
         return pd.read_sql_query("SELECT * FROM products ORDER BY name", self.conn)
 
     def search_customers(self, query: str) -> pd.DataFrame:
-        """Search customers by email or name. Uses parameterized LIKE."""
-        pattern = f"%{query}%"
+        """Search customers by email or name. Uses parameterized LIKE with escaped wildcards."""
+        if len(query) > 100:
+            return pd.DataFrame()
+        # Escape LIKE wildcards so they are treated as literals
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
         return pd.read_sql_query(
             """SELECT * FROM customers
-               WHERE email LIKE ? OR first_name LIKE ? OR last_name LIKE ?
+               WHERE email LIKE ? ESCAPE '\\' OR first_name LIKE ? ESCAPE '\\' OR last_name LIKE ? ESCAPE '\\'
                ORDER BY created_at DESC LIMIT 100""",
             self.conn,
             params=(pattern, pattern, pattern),
@@ -421,12 +437,14 @@ class SamCartCache:
     def delete_customer_data(self, email: str) -> dict[str, int]:
         """Delete all data for a customer by email across all tables. Returns counts."""
         counts = {}
-        for table, col in [
+        deletion_pairs = [
             ("orders", "customer_email"),
             ("customers", "email"),
             ("subscriptions", "customer_email"),
             ("charges", "customer_email"),
-        ]:
+        ]
+        for table, col in deletion_pairs:
+            assert table in _ALLOWED_TABLES, f"Invalid table in deletion pair: {table}"
             cur = self.conn.execute(
                 f"DELETE FROM [{table}] WHERE [{col}] = ?", (email,)
             )

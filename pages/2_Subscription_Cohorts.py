@@ -4,12 +4,15 @@ import plotly.express as px
 import streamlit as st
 
 from analytics import build_cohort_retention
+from auth import require_auth
 from export import render_export_buttons
 from methodology import API_DATA_DICTIONARY, COHORT_RETENTION_METHODOLOGY
 
 from shared import get_cache
 
 st.set_page_config(page_title="Subscription Cohorts", page_icon=":chart_with_upwards_trend:", layout="wide")
+
+require_auth()
 
 st.title("Subscription Cohort Analysis")
 

@@ -9,11 +9,14 @@ from analytics import (
     build_daily_summary,
     new_customer_ltv_by_entry_product,
 )
+from auth import require_auth
 from export import render_export_buttons
 from methodology import API_DATA_DICTIONARY, DAILY_METRICS_METHODOLOGY
 from shared import get_cache
 
 st.set_page_config(page_title="Daily Metrics", page_icon=":chart_with_upwards_trend:", layout="wide")
+
+require_auth()
 
 st.title("Daily Metrics")
 
