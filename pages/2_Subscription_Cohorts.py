@@ -16,6 +16,8 @@ require_auth()
 
 st.title("Subscription Cohort Analysis")
 
+with st.expander("Methodology — How Cohort Retention Is Calculated"):
+    st.markdown(COHORT_RETENTION_METHODOLOGY)
 
 # ------------------------------------------------------------------
 # Cached data loaders
