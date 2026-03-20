@@ -9,6 +9,7 @@ from export import cleanup_old_exports
 from methodology import API_DATA_DICTIONARY, DASHBOARD_METHODOLOGY
 from samcart_api import SamCartAPIError
 from shared import get_cache, get_client
+from version import LAST_UPDATED, VERSION
 
 st.set_page_config(
     page_title="SamCart Analytics",
@@ -17,6 +18,8 @@ st.set_page_config(
 )
 
 require_auth()
+
+st.caption(f"v{VERSION} | Last App Update: {LAST_UPDATED}")
 
 # ------------------------------------------------------------------
 # Sidebar — sync controls
