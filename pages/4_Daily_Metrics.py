@@ -125,7 +125,15 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 with tab1:
     display_df = filtered.copy()
     display_df["date"] = display_df["date"].dt.strftime("%Y-%m-%d")
-    st.dataframe(display_df, use_container_width=True)
+    st.dataframe(
+        display_df,
+        column_config={
+            "sale_revenue": st.column_config.NumberColumn("Sale Revenue", format="$%.2f"),
+            "refund_amount": st.column_config.NumberColumn("Refund Amount", format="$%.2f"),
+            "renewal_revenue": st.column_config.NumberColumn("Renewal Revenue", format="$%.2f"),
+        },
+        use_container_width=True,
+    )
     render_export_buttons(display_df, "daily_summary", key_prefix="daily_summary")
 
 # --- Tab 2: New Customers Trend ---
@@ -258,11 +266,16 @@ with tab6:
         st.plotly_chart(fig_ltv, use_container_width=True)
 
         st.subheader("LTV Details")
-        display_ltv = ltv_df.copy()
-        for col in ["avg_ltv", "median_ltv", "total_ltv"]:
-            display_ltv[col] = display_ltv[col].round(2)
-        st.dataframe(display_ltv, use_container_width=True)
-        render_export_buttons(display_ltv, "entry_product_ltv", key_prefix="entry_ltv")
+        st.dataframe(
+            ltv_df,
+            column_config={
+                "avg_ltv": st.column_config.NumberColumn("Avg LTV", format="$%.2f"),
+                "median_ltv": st.column_config.NumberColumn("Median LTV", format="$%.2f"),
+                "total_ltv": st.column_config.NumberColumn("Total LTV", format="$%.2f"),
+            },
+            use_container_width=True,
+        )
+        render_export_buttons(ltv_df, "entry_product_ltv", key_prefix="entry_ltv")
     else:
         st.info("No LTV data available.")
 

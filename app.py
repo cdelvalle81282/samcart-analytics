@@ -176,7 +176,11 @@ st.subheader("Recent Orders")
 if not orders_df.empty:
     display_cols = ["created_at", "customer_email", "product_name", "total"]
     available_cols = [c for c in display_cols if c in orders_df.columns]
-    st.dataframe(orders_df[available_cols].head(20), use_container_width=True)
+    st.dataframe(
+        orders_df[available_cols].head(20),
+        column_config={"total": st.column_config.NumberColumn("Total", format="$%.2f")},
+        use_container_width=True,
+    )
 
 # ------------------------------------------------------------------
 # Documentation tabs

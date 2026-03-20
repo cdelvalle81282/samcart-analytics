@@ -87,7 +87,11 @@ if query:
             st.subheader("Order History")
             cust_orders = cache.get_customer_orders(selected_email)
             if not cust_orders.empty:
-                st.dataframe(cust_orders, use_container_width=True)
+                st.dataframe(
+                    cust_orders,
+                    column_config={"total": st.column_config.NumberColumn("Total", format="$%.2f")},
+                    use_container_width=True,
+                )
                 render_export_buttons(cust_orders, "customer_orders", key_prefix="cust_orders")
             else:
                 st.info("No orders found.")
@@ -96,7 +100,11 @@ if query:
             st.subheader("Subscriptions")
             cust_subs = cache.get_customer_subscriptions(selected_email)
             if not cust_subs.empty:
-                st.dataframe(cust_subs, use_container_width=True)
+                st.dataframe(
+                    cust_subs,
+                    column_config={"price": st.column_config.NumberColumn("Price", format="$%.2f")},
+                    use_container_width=True,
+                )
             else:
                 st.info("No subscriptions found.")
 
@@ -104,7 +112,11 @@ if query:
             st.subheader("Charges")
             cust_charges = cache.get_customer_charges(selected_email)
             if not cust_charges.empty:
-                st.dataframe(cust_charges, use_container_width=True)
+                st.dataframe(
+                    cust_charges,
+                    column_config={"amount": st.column_config.NumberColumn("Amount", format="$%.2f")},
+                    use_container_width=True,
+                )
             else:
                 st.info("No charges found.")
 
@@ -113,7 +125,14 @@ else:
     st.subheader("Top Customers by LTV")
     ltv_df = calculate_customer_ltv(orders_df, charges_df, subs_df)
     if not ltv_df.empty:
-        st.dataframe(ltv_df.head(50), use_container_width=True)
+        st.dataframe(
+            ltv_df.head(50),
+            column_config={
+                "total_spend": st.column_config.NumberColumn("Total Spend", format="$%.2f"),
+                "estimated_ltv": st.column_config.NumberColumn("Estimated LTV", format="$%.2f"),
+            },
+            use_container_width=True,
+        )
         render_export_buttons(ltv_df, "customer_ltv", key_prefix="all_ltv")
 
 # ------------------------------------------------------------------
