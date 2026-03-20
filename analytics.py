@@ -336,12 +336,12 @@ def enrich_charges_with_product(
     """
     df = charges_df.copy()
 
-    # Join via order_id
-    if not orders_df.empty and "order_id" in df.columns and "order_id" in orders_df.columns:
+    # Join via order_id (charges.order_id → orders.id)
+    if not orders_df.empty and "order_id" in df.columns and "id" in orders_df.columns:
         order_products = (
-            orders_df[["order_id", "product_id", "product_name"]]
-            .drop_duplicates("order_id", keep="last")
-            .rename(columns={"product_id": "o_product_id", "product_name": "o_product_name"})
+            orders_df[["id", "product_id", "product_name"]]
+            .drop_duplicates("id", keep="last")
+            .rename(columns={"id": "order_id", "product_id": "o_product_id", "product_name": "o_product_name"})
         )
         # Ensure matching dtypes
         df["order_id"] = df["order_id"].astype(str)
