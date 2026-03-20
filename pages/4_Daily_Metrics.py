@@ -1,6 +1,7 @@
 """Report 4: Daily Metrics — new customers, sales, refunds, renewals by product."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import plotly.express as px
 import streamlit as st
@@ -73,7 +74,9 @@ selected_products = col_f1.multiselect(
 )
 
 min_date = summary_df["date"].min().date() if hasattr(summary_df["date"].min(), "date") else summary_df["date"].min()
-max_date = summary_df["date"].max().date() if hasattr(summary_df["date"].max(), "date") else summary_df["date"].max()
+today_et = datetime.now(ZoneInfo("America/New_York")).date()
+data_max = summary_df["date"].max().date() if hasattr(summary_df["date"].max(), "date") else summary_df["date"].max()
+max_date = min(data_max, today_et)
 default_start = max(min_date, max_date - timedelta(days=30))
 
 date_range = col_f2.date_input(
