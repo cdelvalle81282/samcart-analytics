@@ -129,9 +129,10 @@ if orders_df.empty and subs_df.empty:
 col1, col2, col3, col4 = st.columns(4)
 
 if not charges_df.empty:
-    from analytics import _is_successful_charge
-    _successful = charges_df[_is_successful_charge(charges_df["status"])]
-    total_revenue = _successful["amount"].sum()
+    from analytics import _is_collected_charge, _net_charge_amount
+    _collected = charges_df[_is_collected_charge(charges_df["status"])].copy()
+    _collected["net_amount"] = _net_charge_amount(_collected)
+    total_revenue = _collected["net_amount"].sum()
 else:
     total_revenue = orders_df["total"].sum() if not orders_df.empty else 0
 total_customers = customers_df["id"].nunique() if not customers_df.empty else 0

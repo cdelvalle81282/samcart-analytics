@@ -1,12 +1,13 @@
 """SQLite cache for SamCart data with hybrid sync strategy."""
 
 import sqlite3
+import time as _time
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import streamlit as st
 
-from samcart_api import SamCartClient, normalize_ts, safe_float
+from samcart_api import SamCartClient, normalize_ts, safe_float, safe_int
 
 
 _ALLOWED_TABLES = frozenset({"orders", "customers", "subscriptions", "charges", "products", "sync_meta"})
@@ -29,6 +30,27 @@ class SamCartCache:
         self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
         self._init_schema()
+        self._migrate_schema()
+
+    def _migrate_schema(self):
+        """Add new columns to existing tables if missing (idempotent)."""
+        migrations = [
+            ("subscriptions", "trial_days", "INTEGER"),
+            ("subscriptions", "next_bill_date", "TEXT"),
+            ("subscriptions", "billing_cycle_count", "INTEGER"),
+            ("charges", "refund_amount", "REAL"),
+            ("charges", "refund_date", "TEXT"),
+        ]
+        for table, column, col_type in migrations:
+            existing = {
+                row[1]
+                for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if column not in existing:
+                self.conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+                )
+        self.conn.commit()
 
     def _init_schema(self):
         """Create tables and indexes if they don't exist."""
@@ -71,7 +93,10 @@ class SamCartCache:
                 interval TEXT,
                 price REAL,
                 created_at TEXT,
-                canceled_at TEXT
+                canceled_at TEXT,
+                trial_days INTEGER,
+                next_bill_date TEXT,
+                billing_cycle_count INTEGER
             );
             CREATE INDEX IF NOT EXISTS idx_subs_status ON subscriptions(status);
             CREATE INDEX IF NOT EXISTS idx_subs_created ON subscriptions(created_at);
@@ -90,7 +115,9 @@ class SamCartCache:
                 customer_email TEXT,
                 amount REAL,
                 status TEXT,
-                created_at TEXT
+                created_at TEXT,
+                refund_amount REAL,
+                refund_date TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_charges_created ON charges(created_at);
             CREATE INDEX IF NOT EXISTS idx_charges_customer ON charges(customer_email);
@@ -115,7 +142,7 @@ class SamCartCache:
         ).fetchone()
         return row[0] if row else None
 
-    def _update_sync_meta(self, table_name: str):
+    def _update_sync_meta(self, table_name: str, commit: bool = True):
         """Update sync_meta with current time and record count."""
         _validate_table(table_name)
         count = self.conn.execute(
@@ -126,7 +153,8 @@ class SamCartCache:
             "INSERT OR REPLACE INTO sync_meta (table_name, last_synced_at, record_count) VALUES (?, ?, ?)",
             (table_name, now, count),
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
     def get_sync_summary(self) -> dict:
         """Returns {table_name: {last_synced_at, record_count}} for sidebar display."""
@@ -216,8 +244,9 @@ class SamCartCache:
 
             self.conn.execute(
                 """INSERT OR REPLACE INTO subscriptions
-                   (id, customer_email, product_id, product_name, status, interval, price, created_at, canceled_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, customer_email, product_id, product_name, status, interval, price, created_at, canceled_at,
+                    trial_days, next_bill_date, billing_cycle_count)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     str(s.get("id", "")),
                     customer_email,
@@ -228,6 +257,9 @@ class SamCartCache:
                     price,
                     normalize_ts(s.get("created_at")),
                     normalize_ts(canceled_at),
+                    safe_int(s.get("trial_days")),
+                    normalize_ts(s.get("next_bill_date")),
+                    safe_int(s.get("billing_cycle_count")),
                 ),
             )
 
@@ -253,8 +285,9 @@ class SamCartCache:
 
             self.conn.execute(
                 """INSERT OR REPLACE INTO charges
-                   (id, order_id, subscription_id, customer_email, amount, status, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (id, order_id, subscription_id, customer_email, amount, status, created_at,
+                    refund_amount, refund_date)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     str(ch.get("id", "")),
                     str(ch.get("order_id", "") or ""),
@@ -263,6 +296,8 @@ class SamCartCache:
                     safe_float(ch.get("total", ch.get("amount"))) / 100,
                     ch.get("charge_refund_status", ch.get("status", "")),
                     normalize_ts(ch.get("created_at")),
+                    safe_float(ch.get("refund_amount")) / 100,
+                    normalize_ts(ch.get("refund_date")),
                 ),
             )
 
@@ -284,8 +319,6 @@ class SamCartCache:
         """Sync a single table: fetch from API, upsert into SQLite, update meta."""
         _validate_table(table_name)
         if force_full:
-            self.conn.execute(f"DELETE FROM [{table_name}]")
-            self.conn.commit()
             since = None
 
         if progress_text:
@@ -303,18 +336,34 @@ class SamCartCache:
             except TypeError:
                 records = fetcher()
 
-        if records:
-            # Commit per batch for crash safety
-            batch_size = 100
-            for i in range(0, len(records), batch_size):
-                batch = records[i : i + batch_size]
-                if customer_map is not None:
-                    upserter(batch, customer_map=customer_map)
-                else:
-                    upserter(batch)
+        batch_size = 100
+        if force_full:
+            # Replace full-sync tables atomically so failures preserve prior data.
+            try:
+                self.conn.execute("BEGIN")
+                self.conn.execute(f"DELETE FROM [{table_name}]")
+                for i in range(0, len(records), batch_size):
+                    batch = records[i : i + batch_size]
+                    if customer_map is not None:
+                        upserter(batch, customer_map=customer_map)
+                    else:
+                        upserter(batch)
+                self._update_sync_meta(table_name, commit=False)
                 self.conn.commit()
-
-        self._update_sync_meta(table_name)
+            except Exception:
+                self.conn.rollback()
+                raise
+        else:
+            if records:
+                # Commit per batch for crash safety on incremental syncs.
+                for i in range(0, len(records), batch_size):
+                    batch = records[i : i + batch_size]
+                    if customer_map is not None:
+                        upserter(batch, customer_map=customer_map)
+                    else:
+                        upserter(batch)
+                    self.conn.commit()
+            self._update_sync_meta(table_name)
         return records or []
 
     def _build_customer_map(self) -> dict:
@@ -328,7 +377,8 @@ class SamCartCache:
         - products: always full (small table)
         - customers: sync first to build id->email map
         - subscriptions: always full (status is mutable)
-        - orders, charges: incremental unless force_full
+        - charges: always full (refund status is mutable)
+        - orders: incremental unless force_full
 
         Incremental uses a 1-hour overlap window + UPSERT to catch boundary records.
         Set headless=True to run without Streamlit UI (e.g. from a CI cron job).
@@ -339,58 +389,64 @@ class SamCartCache:
             progress = st.progress(0, text="Starting sync...")
         total_records = 0
 
+        def _timed_sync(label, pct, sync_fn):
+            nonlocal total_records
+            if headless:
+                print(f"Syncing {label}...")
+            else:
+                progress.progress(pct, text=f"Syncing {label}...")
+            t0 = _time.time()
+            recs = sync_fn()
+            elapsed = _time.time() - t0
+            if headless:
+                print(f"  {label}: {len(recs)} records in {elapsed:.1f}s")
+            total_records += len(recs)
+
         # Products: always full (small table)
-        if headless:
-            print("Syncing products...")
-        else:
-            progress.progress(0.05, text="Syncing products...")
-        recs = self._sync_table("products", client.get_products, self._upsert_products, force_full=True, headless=headless)
-        total_records += len(recs)
+        _timed_sync("products", 0.05, lambda: self._sync_table(
+            "products", client.get_products, self._upsert_products,
+            force_full=True, headless=headless,
+        ))
 
         # Customers FIRST — needed to map customer_id -> email for other tables
-        if headless:
-            print("Syncing customers...")
-        else:
-            progress.progress(0.15, text="Syncing customers...")
         since = None
         if not force_full:
             last_sync = self.get_last_sync("customers")
             if last_sync:
                 dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
                 since = (dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        recs = self._sync_table("customers", client.get_customers, self._upsert_customers, since=since, force_full=force_full, headless=headless)
-        total_records += len(recs)
+        _timed_sync("customers", 0.15, lambda: self._sync_table(
+            "customers", client.get_customers, self._upsert_customers,
+            since=since, force_full=force_full, headless=headless,
+        ))
 
         # Build customer_id -> email map from the cache
         customer_map = self._build_customer_map()
 
         # Subscriptions: ALWAYS full sync — status is mutable
-        if headless:
-            print("Syncing subscriptions...")
-        else:
-            progress.progress(0.35, text="Syncing subscriptions...")
-        recs = self._sync_table("subscriptions", client.get_subscriptions, self._upsert_subscriptions, force_full=True, customer_map=customer_map, headless=headless)
-        total_records += len(recs)
+        _timed_sync("subscriptions", 0.35, lambda: self._sync_table(
+            "subscriptions", client.get_subscriptions, self._upsert_subscriptions,
+            force_full=True, customer_map=customer_map, headless=headless,
+        ))
 
-        # Orders & charges: incremental with 1-hour overlap
-        incremental_tables = [
-            ("orders", client.get_orders, self._upsert_orders, 0.6),
-            ("charges", client.get_charges, self._upsert_charges, 0.85),
-        ]
+        # Charges: ALWAYS full sync — refund status is mutable
+        _timed_sync("charges", 0.55, lambda: self._sync_table(
+            "charges", client.get_charges, self._upsert_charges,
+            force_full=True, customer_map=customer_map, headless=headless,
+        ))
 
-        for table_name, fetcher, upserter, pct in incremental_tables:
-            if headless:
-                print(f"Syncing {table_name}...")
-            else:
-                progress.progress(pct, text=f"Syncing {table_name}...")
-            since = None
-            if not force_full:
-                last_sync = self.get_last_sync(table_name)
-                if last_sync:
-                    dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
-                    since = (dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            recs = self._sync_table(table_name, fetcher, upserter, since=since, force_full=force_full, customer_map=customer_map, headless=headless)
-            total_records += len(recs)
+        # Orders: incremental with 1-hour overlap
+        since = None
+        if not force_full:
+            last_sync = self.get_last_sync("orders")
+            if last_sync:
+                dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
+                since = (dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _timed_sync("orders", 0.8, lambda: self._sync_table(
+            "orders", client.get_orders, self._upsert_orders,
+            since=since, force_full=force_full, customer_map=customer_map,
+            headless=headless,
+        ))
 
         if headless:
             print("Sync complete!")
