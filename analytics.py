@@ -381,12 +381,19 @@ def enrich_charges_with_product(
     return df
 
 
-def _identify_renewals(charges_df: pd.DataFrame) -> pd.Series:
+def _identify_renewals(
+    charges_df: pd.DataFrame,
+    subscriptions_df: pd.DataFrame | None = None,
+) -> pd.Series:
     """
     Return a boolean Series: True for renewal charges, False for initial purchases.
 
     For each subscription_id, ranks charges by created_at. Rank > 1 = renewal.
     Charges with no subscription_id are never renewals.
+
+    Additionally, if a rank-1 charge's subscription was created more than 48 hours
+    before the charge, it is treated as a renewal. This handles cases where older
+    charges were not synced and the earliest charge in the DB is not truly the first.
     """
     result = pd.Series(False, index=charges_df.index)
 
@@ -397,9 +404,35 @@ def _identify_renewals(charges_df: pd.DataFrame) -> pd.Series:
 
     if has_sub.any():
         sub_charges = charges_df.loc[has_sub].copy()
-        sub_charges["created_at"] = pd.to_datetime(sub_charges["created_at"], errors="coerce")
-        sub_charges["rank"] = sub_charges.groupby("subscription_id")["created_at"].rank(method="first")
-        result.loc[sub_charges.index] = sub_charges["rank"] > 1
+        sub_charges["_charge_dt"] = pd.to_datetime(sub_charges["created_at"], errors="coerce")
+        sub_charges["rank"] = sub_charges.groupby("subscription_id")["_charge_dt"].rank(method="first")
+        is_ranked_renewal = sub_charges["rank"] > 1
+
+        # For rank-1 charges, check if the subscription predates the charge
+        if subscriptions_df is not None and not subscriptions_df.empty:
+            rank1_mask = sub_charges["rank"] == 1
+            if rank1_mask.any():
+                rank1 = sub_charges.loc[rank1_mask].copy()
+                rank1["_orig_idx"] = rank1.index
+                sub_dates = (
+                    subscriptions_df[["id", "created_at"]]
+                    .drop_duplicates("id", keep="last")
+                    .rename(columns={"id": "subscription_id", "created_at": "_sub_created"})
+                )
+                sub_dates["subscription_id"] = sub_dates["subscription_id"].astype(str)
+                rank1["subscription_id"] = rank1["subscription_id"].astype(str)
+                rank1 = rank1.merge(sub_dates, on="subscription_id", how="left")
+                rank1["_sub_created_dt"] = pd.to_datetime(rank1["_sub_created"], errors="coerce", utc=True)
+                charge_dt = rank1["_charge_dt"]
+                if charge_dt.dt.tz is None:
+                    charge_dt = charge_dt.dt.tz_localize("UTC")
+                else:
+                    charge_dt = charge_dt.dt.tz_convert("UTC")
+                age = charge_dt - rank1["_sub_created_dt"]
+                old_sub_idx = rank1.loc[age > pd.Timedelta(hours=48), "_orig_idx"]
+                is_ranked_renewal.loc[old_sub_idx] = True
+
+        result.loc[sub_charges.index] = is_ranked_renewal
 
     return result
 
@@ -467,7 +500,7 @@ def daily_new_sales(
     df["date"] = df["created_at"].dt.date
 
     # Exclude renewals
-    is_renewal = _identify_renewals(df)
+    is_renewal = _identify_renewals(df, subscriptions_df)
     df = df[~is_renewal]
 
     if df.empty:
@@ -545,8 +578,8 @@ def daily_renewals(
     df = df.dropna(subset=["created_at"])
     df["date"] = df["created_at"].dt.date
 
-    # Keep only renewals (rank > 1)
-    is_renewal = _identify_renewals(df)
+    # Keep only renewals (rank > 1, or rank 1 on old subscription)
+    is_renewal = _identify_renewals(df, subscriptions_df)
     df = df[is_renewal]
 
     if df.empty:
