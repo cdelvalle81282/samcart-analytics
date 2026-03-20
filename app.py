@@ -36,7 +36,7 @@ if not client.api_key or client.api_key == "sc_live_YOUR_KEY_HERE":
 else:
     try:
         if client.verify_credentials():
-            st.sidebar.success("Connected to SamCart", icon=":white_check_mark:")
+            st.sidebar.success("Connected to SamCart")
         else:
             st.sidebar.error("Invalid API key")
     except Exception as e:
