@@ -1,4 +1,5 @@
 .streamlit/secrets.toml
+*.db
 *.db-shm
 *.db-wal
 exports/
