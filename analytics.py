@@ -1,8 +1,17 @@
 """Pure pandas analytics functions — no DB or API imports."""
 
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
+
+# All display dates should be in Eastern time
+ET = ZoneInfo("America/New_York")
+
+
+def _to_eastern(series: pd.Series) -> pd.Series:
+    """Convert a UTC datetime series to Eastern time."""
+    return pd.to_datetime(series, utc=True).dt.tz_convert(ET)
 
 # Charge status constants
 # Note: SamCart API leaves status NULL for successful charges.
@@ -125,18 +134,18 @@ def build_cohort_retention(
         return pd.DataFrame()
 
     subs = subscriptions_df.copy()
-    subs["created_at"] = pd.to_datetime(subs["created_at"], errors="coerce")
+    subs["created_at"] = _to_eastern(subs["created_at"])
     subs = subs.dropna(subset=["created_at"])
 
     if subs.empty:
         return pd.DataFrame()
 
-    # Assign cohort
+    # Assign cohort (Eastern time)
     subs["cohort"] = subs["created_at"].dt.to_period("M")
 
     # Determine end date per subscription
-    now = pd.Timestamp(datetime.now(timezone.utc))
-    subs["canceled_at"] = pd.to_datetime(subs["canceled_at"], errors="coerce")
+    now = pd.Timestamp(datetime.now(ET))
+    subs["canceled_at"] = pd.to_datetime(subs["canceled_at"], utc=True).dt.tz_convert(ET)
     subs["end_date"] = subs["canceled_at"].fillna(now)
 
     # Calculate months active
@@ -219,9 +228,9 @@ def product_ltv_ranking(
     # Subscription stats by product
     if not subscriptions_df.empty:
         subs = subscriptions_df.copy()
-        subs["created_at"] = pd.to_datetime(subs["created_at"], errors="coerce")
-        subs["canceled_at"] = pd.to_datetime(subs["canceled_at"], errors="coerce")
-        now = pd.Timestamp(datetime.now(timezone.utc))
+        subs["created_at"] = _to_eastern(subs["created_at"])
+        subs["canceled_at"] = pd.to_datetime(subs["canceled_at"], utc=True).dt.tz_convert(ET)
+        now = pd.Timestamp(datetime.now(ET))
         subs["end_date"] = subs["canceled_at"].fillna(now)
         subs["lifetime_months"] = (
             (subs["end_date"] - subs["created_at"]).dt.days / 30.44
@@ -259,7 +268,7 @@ def monthly_revenue_summary(
     order_counts = pd.DataFrame(columns=["month", "order_count"])
     if not orders_df.empty:
         odf = orders_df.copy()
-        odf["created_at"] = pd.to_datetime(odf["created_at"], errors="coerce")
+        odf["created_at"] = _to_eastern(odf["created_at"])
         odf = odf.dropna(subset=["created_at"])
         if not odf.empty:
             odf["month"] = odf["created_at"].dt.to_period("M").astype(str)
@@ -273,7 +282,7 @@ def monthly_revenue_summary(
     if charges_df is not None and not charges_df.empty:
         cdf = charges_df.copy()
         cdf = cdf[_is_successful_charge(cdf["status"])]
-        cdf["created_at"] = pd.to_datetime(cdf["created_at"], errors="coerce")
+        cdf["created_at"] = _to_eastern(cdf["created_at"])
         cdf = cdf.dropna(subset=["created_at"])
         if not cdf.empty:
             cdf["month"] = cdf["created_at"].dt.to_period("M").astype(str)
@@ -288,7 +297,7 @@ def monthly_revenue_summary(
         # Fallback to orders if no charges available
         if not orders_df.empty:
             odf2 = orders_df.copy()
-            odf2["created_at"] = pd.to_datetime(odf2["created_at"], errors="coerce")
+            odf2["created_at"] = _to_eastern(odf2["created_at"])
             odf2 = odf2.dropna(subset=["created_at"])
             odf2["month"] = odf2["created_at"].dt.to_period("M").astype(str)
             revenue = (
@@ -409,7 +418,7 @@ def daily_new_to_file(orders_df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=cols)
 
     df = orders_df.copy()
-    df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+    df["created_at"] = _to_eastern(df["created_at"])
     df = df.dropna(subset=["created_at"])
     if df.empty:
         return pd.DataFrame(columns=cols)
@@ -453,7 +462,7 @@ def daily_new_sales(
         return pd.DataFrame(columns=cols)
 
     df = enrich_charges_with_product(df, orders_df, subscriptions_df)
-    df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+    df["created_at"] = _to_eastern(df["created_at"])
     df = df.dropna(subset=["created_at"])
     df["date"] = df["created_at"].dt.date
 
@@ -492,7 +501,7 @@ def daily_refunds(
         return pd.DataFrame(columns=cols)
 
     df = enrich_charges_with_product(df, orders_df, subscriptions_df)
-    df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+    df["created_at"] = _to_eastern(df["created_at"])
     df = df.dropna(subset=["created_at"])
     df["date"] = df["created_at"].dt.date
 
@@ -532,7 +541,7 @@ def daily_renewals(
         return pd.DataFrame(columns=cols)
 
     df = enrich_charges_with_product(df, orders_df, subscriptions_df)
-    df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+    df["created_at"] = _to_eastern(df["created_at"])
     df = df.dropna(subset=["created_at"])
     df["date"] = df["created_at"].dt.date
 
@@ -613,7 +622,7 @@ def new_customer_ltv_by_entry_product(
         return pd.DataFrame(columns=cols)
 
     odf = orders_df.copy()
-    odf["created_at"] = pd.to_datetime(odf["created_at"], errors="coerce")
+    odf["created_at"] = _to_eastern(odf["created_at"])
     odf = odf.dropna(subset=["created_at"])
     if odf.empty:
         return pd.DataFrame(columns=cols)

@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from analytics import product_ltv_ranking
+from analytics import _to_eastern, product_ltv_ranking
 from auth import require_auth
 from export import render_export_buttons
 from methodology import API_DATA_DICTIONARY, PRODUCT_LTV_METHODOLOGY
@@ -52,7 +52,7 @@ if orders_df.empty:
 col1, col2 = st.columns(2)
 
 # Date range filter
-orders_df["created_at"] = pd.to_datetime(orders_df["created_at"], errors="coerce")
+orders_df["created_at"] = _to_eastern(orders_df["created_at"])
 min_date = orders_df["created_at"].min()
 max_date = orders_df["created_at"].max()
 
