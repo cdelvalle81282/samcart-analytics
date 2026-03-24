@@ -421,6 +421,143 @@ def build_cohort_performance(
     return activity, renewal, stick_df
 
 
+def build_cohort_heatmap(
+    charges_df: pd.DataFrame,
+    orders_df: pd.DataFrame,
+    subscriptions_df: pd.DataFrame,
+    *,
+    product_filter: str | None = None,
+    interval_filter: str | None = None,
+) -> pd.DataFrame:
+    """
+    Per-period cohort retention heatmap based on actual charges.
+
+    For each subscription, charges are ranked by created_at ascending.
+    Period 0 = initial charge; period 1, 2, ... = renewals.
+    Cohort = calendar month (Eastern time) of the period-0 charge.
+
+    Returns a pivot table:
+        index = cohort month string (e.g. "2024-01")
+        columns = "cohort_size" + integer period columns (0, 1, 2, ...)
+        values = retention % (% of cohort subs with a successful charge at that period)
+        index.name = "cohort"
+
+    Returns empty DataFrame if no qualifying data.
+    """
+    if charges_df.empty:
+        return pd.DataFrame()
+
+    # --- 1. Filter to subscription-linked charges ---
+    df = charges_df.copy()
+    df = df[df["subscription_id"].notna()]
+    df["subscription_id"] = df["subscription_id"].astype(str).str.strip()
+    df = df[df["subscription_id"].ne("") & df["subscription_id"].ne("nan")]
+    if df.empty:
+        return pd.DataFrame()
+
+    # --- 2. Enrich with product info ---
+    df = enrich_charges_with_product(df, orders_df, subscriptions_df)
+
+    # --- 3. Join interval from subscriptions table ---
+    if (
+        not subscriptions_df.empty
+        and "id" in subscriptions_df.columns
+        and "interval" in subscriptions_df.columns
+    ):
+        interval_map = (
+            subscriptions_df[["id", "interval"]]
+            .drop_duplicates("id", keep="last")
+            .rename(columns={"id": "subscription_id"})
+        )
+        interval_map["subscription_id"] = interval_map["subscription_id"].astype(str)
+        df["subscription_id"] = df["subscription_id"].astype(str)
+        df = df.merge(interval_map, on="subscription_id", how="left", suffixes=("", "_sub"))
+        if "interval_sub" in df.columns:
+            df["interval"] = df["interval_sub"].fillna(df.get("interval", pd.NA))
+            df = df.drop(columns=["interval_sub"])
+    else:
+        if "interval" not in df.columns:
+            df["interval"] = pd.NA
+
+    # --- 4. Apply product/interval filters ---
+    if product_filter:
+        df = df[df["product_id"].astype(str) == str(product_filter)]
+    if interval_filter:
+        df = df[df["interval"].astype(str).str.lower() == interval_filter.lower()]
+    if df.empty:
+        return pd.DataFrame()
+
+    # --- 5. Classify successful charges ---
+    df["is_successful"] = _is_successful_charge(df["status"])
+
+    # --- 6. Parse dates and drop NaT ---
+    df["created_at_ts"] = pd.to_datetime(df["created_at"], utc=True, errors="coerce")
+    df = df.dropna(subset=["created_at_ts"])
+    if df.empty:
+        return pd.DataFrame()
+
+    # --- 7. Rank charges per subscription by created_at (period 0, 1, 2, ...) ---
+    df = df.sort_values(["subscription_id", "created_at_ts"])
+    df["period"] = df.groupby("subscription_id").cumcount()  # 0-based
+
+    # Cap max periods at 52
+    df = df[df["period"] <= 52]
+
+    # --- 8. Determine cohort = month of period-0 charge (Eastern time) ---
+    period0 = df[df["period"] == 0][["subscription_id", "created_at_ts"]].copy()
+    period0["cohort_period"] = (
+        period0["created_at_ts"].dt.tz_convert(ET).dt.to_period("M")
+    )
+    period0 = period0[["subscription_id", "cohort_period"]]
+    df = df.merge(period0, on="subscription_id", how="left")
+    df = df.dropna(subset=["cohort_period"])
+    if df.empty:
+        return pd.DataFrame()
+
+    # --- 9. For each cohort, track % of subs with a successful charge at each period ---
+    # Only count successful charges for retention
+    successful = df[df["is_successful"]]
+
+    # Cohort sizes: count of unique subs per cohort
+    cohort_subs = df.drop_duplicates("subscription_id")[["subscription_id", "cohort_period"]]
+    cohort_sizes = cohort_subs.groupby("cohort_period")["subscription_id"].nunique()
+
+    # For each cohort+period, count unique subs with a successful charge
+    retention = (
+        successful.groupby(["cohort_period", "period"])["subscription_id"]
+        .nunique()
+        .reset_index(name="active_count")
+    )
+
+    # --- 10. Build pivot table ---
+    cohorts_sorted = sorted(cohort_sizes.index)
+    max_period = int(df["period"].max()) if not df["period"].isna().all() else 0
+    max_period = min(max_period, 52)
+
+    rows = []
+    for cohort in cohorts_sorted:
+        size = cohort_sizes[cohort]
+        if size == 0:
+            continue
+        row = {"cohort": str(cohort), "cohort_size": size}
+        cohort_retention = retention[retention["cohort_period"] == cohort]
+        for period in range(max_period + 1):
+            match = cohort_retention[cohort_retention["period"] == period]
+            if not match.empty:
+                row[period] = match["active_count"].iloc[0] / size * 100
+            else:
+                row[period] = 0.0
+        rows.append(row)
+
+    if not rows:
+        return pd.DataFrame()
+
+    result = pd.DataFrame(rows).set_index("cohort")
+    result.index.name = "cohort"
+
+    return result
+
+
 def product_ltv_ranking(
     orders_df: pd.DataFrame,
     subscriptions_df: pd.DataFrame,

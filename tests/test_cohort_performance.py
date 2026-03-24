@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from analytics import build_cohort_performance
+from analytics import build_cohort_performance, build_cohort_heatmap
 
 
 # ------------------------------------------------------------------
@@ -432,3 +432,159 @@ class TestAllSubsInOneCohort:
         )
         assert not activity.empty
         assert activity.iloc[0]["active_subscribers"] == 2
+
+
+# ==================================================================
+# Tests for build_cohort_heatmap
+# ==================================================================
+
+
+class TestHeatmapReturnShape:
+    """build_cohort_heatmap returns a DataFrame with expected structure."""
+
+    def test_returns_dataframe(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+        )
+        assert isinstance(result, pd.DataFrame)
+
+    def test_index_name_is_cohort(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+        )
+        assert result.index.name == "cohort"
+
+    def test_has_cohort_size_column(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+        )
+        assert "cohort_size" in result.columns
+
+    def test_has_integer_period_columns(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+        )
+        period_cols = [c for c in result.columns if isinstance(c, int)]
+        assert len(period_cols) > 0
+        assert 0 in period_cols
+
+
+class TestHeatmapEmptyInput:
+    """Empty or invalid charges returns empty DataFrame."""
+
+    def test_empty_charges(self):
+        empty_charges = pd.DataFrame(columns=[
+            "id", "order_id", "subscription_id", "customer_email",
+            "amount", "refund_amount", "status", "created_at",
+        ])
+        result = build_cohort_heatmap(
+            empty_charges, _make_orders(), _make_subscriptions(),
+        )
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+    def test_no_subscription_charges(self):
+        charges = pd.DataFrame({
+            "id": ["c1"],
+            "order_id": ["o1"],
+            "subscription_id": [""],
+            "customer_email": ["a@t.co"],
+            "amount": [99.0],
+            "refund_amount": [0.0],
+            "status": [""],
+            "created_at": ["2024-01-01T10:00:00Z"],
+        })
+        result = build_cohort_heatmap(
+            charges, _make_orders(), _make_subscriptions(),
+        )
+        assert result.empty
+
+
+class TestHeatmapPeriodZeroRetention:
+    """Period 0 retention is always 100% for every cohort."""
+
+    def test_period_zero_is_100(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+        )
+        # All test subs start in 2024-01, so one cohort row
+        assert not result.empty
+        assert 0 in result.columns
+        # Every cohort should have 100% at period 0
+        for val in result[0]:
+            assert val == pytest.approx(100.0)
+
+
+class TestHeatmapValuesRange:
+    """Retention values are percentages between 0 and 100."""
+
+    def test_values_in_range(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+        )
+        period_cols = [c for c in result.columns if isinstance(c, int)]
+        for col in period_cols:
+            for val in result[col]:
+                assert 0 <= val <= 100
+
+
+class TestHeatmapCohortSize:
+    """Cohort size reflects the number of subscriptions."""
+
+    def test_cohort_size_correct(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+        )
+        # Both subs start in 2024-01 -> one cohort of size 2
+        assert result.iloc[0]["cohort_size"] == 2
+
+
+class TestHeatmapRetentionDecay:
+    """Retention decays as refunded subs drop off."""
+
+    def test_period_one_retention(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+        )
+        # Period 1: s1 has successful charge, s2 has refunded charge
+        # Only s1 retained -> 50%
+        assert result.iloc[0][1] == pytest.approx(50.0)
+
+    def test_period_two_retention(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+        )
+        # Period 2: only s1 has a charge -> 50%
+        assert result.iloc[0][2] == pytest.approx(50.0)
+
+
+class TestHeatmapFilters:
+    """Product and interval filters work."""
+
+    def test_product_filter_match(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+            product_filter="p1",
+        )
+        assert not result.empty
+
+    def test_product_filter_no_match(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+            product_filter="p_nonexistent",
+        )
+        assert result.empty
+
+    def test_interval_filter_match(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+            interval_filter="weekly",
+        )
+        assert not result.empty
+
+    def test_interval_filter_no_match(self):
+        result = build_cohort_heatmap(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+            interval_filter="monthly",
+        )
+        assert result.empty
