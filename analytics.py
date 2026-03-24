@@ -230,6 +230,195 @@ def build_cohort_retention(
     return result
 
 
+def build_cohort_performance(
+    charges_df: pd.DataFrame,
+    orders_df: pd.DataFrame,
+    subscriptions_df: pd.DataFrame,
+    *,
+    product_filter: str | None = None,
+    interval_filter: str | None = None,
+    combined_cohort: bool = False,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Charge-based cohort performance analysis for subscription charges.
+
+    Returns a tuple of three DataFrames:
+        (activity_summary, renewal_rates, stick_rates)
+
+    For each subscription, charges are ranked by created_at ascending.
+    Rank 1 = Period 0 (initial purchase), Rank 2+ = renewal periods.
+    Only charges linked to a subscription_id are included.
+    """
+    # Column definitions for empty returns
+    activity_cols = [
+        "period", "active_subscribers", "renewals", "initial_charges",
+        "total_charged", "cumulative_refunds", "refunds_this_period",
+        "period_revenue", "cumulative_revenue",
+    ]
+    renewal_cols = [
+        "period", "subscribers_start", "subscribers_end",
+        "dropped_off", "renewal_rate", "stick_rate", "notes",
+    ]
+    stick_cols = [
+        "period", "original_cohort", "still_active",
+        "dropped_cumulative", "stick_rate", "cumulative_refunds",
+        "refund_rate", "churn_refund_rate",
+    ]
+    empty_activity = pd.DataFrame(columns=activity_cols)
+    empty_renewal = pd.DataFrame(columns=renewal_cols)
+    empty_stick = pd.DataFrame(columns=stick_cols)
+
+    if charges_df.empty:
+        return empty_activity, empty_renewal, empty_stick
+
+    # --- 1. Filter to subscription-linked charges only ---
+    df = charges_df.copy()
+    df["subscription_id"] = df["subscription_id"].astype(str).str.strip()
+    df = df[df["subscription_id"].ne("") & df["subscription_id"].notna()]
+    if df.empty:
+        return empty_activity, empty_renewal, empty_stick
+
+    # --- 2. Enrich charges with product info ---
+    df = enrich_charges_with_product(df, orders_df, subscriptions_df)
+
+    # --- 3. Join interval from subscriptions table ---
+    if (
+        not subscriptions_df.empty
+        and "id" in subscriptions_df.columns
+        and "interval" in subscriptions_df.columns
+    ):
+        interval_map = (
+            subscriptions_df[["id", "interval"]]
+            .drop_duplicates("id", keep="last")
+            .rename(columns={"id": "subscription_id"})
+        )
+        interval_map["subscription_id"] = interval_map["subscription_id"].astype(str)
+        df["subscription_id"] = df["subscription_id"].astype(str)
+        df = df.merge(interval_map, on="subscription_id", how="left", suffixes=("", "_sub"))
+        # If interval came from subscriptions, prefer it
+        if "interval_sub" in df.columns:
+            df["interval"] = df["interval_sub"].fillna(df.get("interval", pd.NA))
+            df = df.drop(columns=["interval_sub"])
+    else:
+        if "interval" not in df.columns:
+            df["interval"] = pd.NA
+
+    # --- 4. Apply product/interval filters ---
+    if product_filter:
+        df = df[df["product_id"].astype(str) == str(product_filter)]
+    if interval_filter:
+        df = df[df["interval"].astype(str).str.lower() == interval_filter.lower()]
+    if df.empty:
+        return empty_activity, empty_renewal, empty_stick
+
+    # --- 5. Classify charges ---
+    df["is_successful"] = _is_successful_charge(df["status"])
+    df["is_refund"] = _is_refund_charge(df["status"])
+
+    # --- 6. Rank charges per subscription by created_at ascending ---
+    df["created_at_ts"] = pd.to_datetime(df["created_at"], utc=True)
+    df = df.sort_values(["subscription_id", "created_at_ts"])
+    df["rank"] = df.groupby("subscription_id").cumcount() + 1
+    df["period"] = df["rank"] - 1  # Rank 1 = Period 0
+
+    # --- 7. Compute net revenue ---
+    df["net_amount"] = _net_charge_amount(df)
+
+    # --- 8. Build activity summary ---
+    periods = sorted(df["period"].unique())
+
+    activity_rows = []
+    for period in periods:
+        period_df = df[df["period"] == period]
+        successful_df = period_df[period_df["is_successful"]]
+        refund_df = period_df[period_df["is_refund"]]
+
+        active_subs = successful_df["subscription_id"].nunique()
+        refunds_this = refund_df["subscription_id"].nunique()
+        # total_charged = unique subs with a successful OR refunded charge
+        charged_subs = period_df[
+            period_df["is_successful"] | period_df["is_refund"]
+        ]["subscription_id"].nunique()
+        period_revenue = successful_df["net_amount"].sum()
+
+        activity_rows.append({
+            "period": period,
+            "active_subscribers": active_subs,
+            "renewals": active_subs if period > 0 else 0,
+            "initial_charges": active_subs if period == 0 else 0,
+            "total_charged": charged_subs,
+            "refunds_this_period": refunds_this,
+            "period_revenue": period_revenue,
+        })
+
+    activity = pd.DataFrame(activity_rows)
+
+    # Cumulative columns
+    activity["cumulative_refunds"] = activity["refunds_this_period"].cumsum()
+    activity["cumulative_revenue"] = activity["period_revenue"].cumsum()
+
+    # --- 9. Build renewal rates (periods > 0 only) ---
+    cohort_size = activity.loc[activity["period"] == 0, "active_subscribers"].iloc[0]
+
+    renewal_rows = []
+    for i, period in enumerate(periods):
+        if period == 0:
+            continue
+        prev_period = periods[i - 1]
+        start = activity.loc[
+            activity["period"] == prev_period, "active_subscribers"
+        ].iloc[0]
+        end = activity.loc[
+            activity["period"] == period, "active_subscribers"
+        ].iloc[0]
+        dropped = start - end
+        rate = (end / start * 100) if start > 0 else 0.0
+        stick = (end / cohort_size * 100) if cohort_size > 0 else 0.0
+        renewal_rows.append({
+            "period": period,
+            "subscribers_start": start,
+            "subscribers_end": end,
+            "dropped_off": dropped,
+            "renewal_rate": rate,
+            "stick_rate": stick,
+            "notes": "",
+        })
+
+    renewal = pd.DataFrame(renewal_rows)
+    if not renewal.empty:
+        max_drop_idx = renewal["dropped_off"].idxmax()
+        renewal.loc[max_drop_idx, "notes"] = "Largest period-over-period drop"
+
+    # --- 10. Build stick rates (all periods) ---
+    stick_rows = []
+    cum_refunds = 0
+    for _, row in activity.iterrows():
+        period = row["period"]
+        still_active = row["active_subscribers"]
+        cum_refunds += row["refunds_this_period"]
+        dropped_cum = cohort_size - still_active
+        s_rate = (still_active / cohort_size * 100) if cohort_size > 0 else 0.0
+        r_rate = (cum_refunds / cohort_size * 100) if cohort_size > 0 else 0.0
+        cr_rate = (
+            ((dropped_cum + cum_refunds) / cohort_size * 100)
+            if cohort_size > 0 else 0.0
+        )
+        stick_rows.append({
+            "period": period,
+            "original_cohort": cohort_size,
+            "still_active": still_active,
+            "dropped_cumulative": dropped_cum,
+            "stick_rate": s_rate,
+            "cumulative_refunds": cum_refunds,
+            "refund_rate": r_rate,
+            "churn_refund_rate": cr_rate,
+        })
+
+    stick_df = pd.DataFrame(stick_rows)
+
+    return activity, renewal, stick_df
+
+
 def product_ltv_ranking(
     orders_df: pd.DataFrame,
     subscriptions_df: pd.DataFrame,
