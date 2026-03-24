@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
@@ -137,7 +138,16 @@ with tab1:
         },
         use_container_width=True,
     )
-    render_export_buttons(display_df, "daily_summary", key_prefix="daily_summary")
+    # Export version includes totals row
+    totals = {col: "" for col in display_df.columns}
+    totals["date"] = "TOTAL"
+    totals["product_name"] = ""
+    for col in ["new_customer_count", "sale_count", "sale_revenue",
+                "refund_count", "refund_amount", "renewal_count", "renewal_revenue"]:
+        if col in display_df.columns:
+            totals[col] = display_df[col].sum()
+    export_df = pd.concat([display_df, pd.DataFrame([totals])], ignore_index=True)
+    render_export_buttons(export_df, "daily_summary", key_prefix="daily_summary")
 
 # --- Tab 2: New Customers Trend ---
 with tab2:

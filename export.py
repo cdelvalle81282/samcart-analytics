@@ -45,7 +45,12 @@ def export_to_excel(df: pd.DataFrame, sheet_name: str = "Data", include_pii: boo
             ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 2, 50)
         # Format currency columns
         for col_idx, col_name in enumerate(df.columns, 1):
-            if col_name in ("total", "amount", "total_spend", "total_revenue", "avg_order_value", "price", "estimated_ltv"):
+            if col_name in (
+                    "total", "amount", "total_spend", "total_revenue",
+                    "avg_order_value", "price", "estimated_ltv",
+                    "sale_revenue", "refund_amount", "renewal_revenue",
+                    "period_revenue", "cumulative_revenue",
+                ):
                 for row_idx in range(2, len(df) + 2):
                     ws.cell(row=row_idx, column=col_idx).number_format = '$#,##0.00'
     buf.seek(0)
