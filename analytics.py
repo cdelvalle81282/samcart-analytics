@@ -273,8 +273,9 @@ def build_cohort_performance(
 
     # --- 1. Filter to subscription-linked charges only ---
     df = charges_df.copy()
+    df = df[df["subscription_id"].notna()]
     df["subscription_id"] = df["subscription_id"].astype(str).str.strip()
-    df = df[df["subscription_id"].ne("") & df["subscription_id"].notna()]
+    df = df[df["subscription_id"].ne("") & df["subscription_id"].ne("nan")]
     if df.empty:
         return empty_activity, empty_renewal, empty_stick
 

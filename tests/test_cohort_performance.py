@@ -10,17 +10,19 @@ from analytics import build_cohort_performance
 # Shared test fixtures
 # ------------------------------------------------------------------
 
-def _make_charges():
+def _make_charges(subscription_id=None):
     """
     5 charges across 2 subscriptions, both weekly, product "Widget" at $99.
 
     s1: 3 charges (initial + 2 renewals), all successful
     s2: 2 charges (initial successful + 1 refunded renewal)
     """
+    if subscription_id is None:
+        subscription_id = ["s1", "s1", "s1", "s2", "s2"]
     return pd.DataFrame({
         "id": ["c1", "c2", "c3", "c4", "c5"],
         "order_id": ["o1", "o1", "o1", "o2", "o2"],
-        "subscription_id": ["s1", "s1", "s1", "s2", "s2"],
+        "subscription_id": subscription_id,
         "customer_email": ["a@t.co", "a@t.co", "a@t.co", "b@t.co", "b@t.co"],
         "amount": [99.0, 99.0, 99.0, 99.0, 99.0],
         "refund_amount": [0.0, 0.0, 0.0, 0.0, 99.0],
@@ -360,6 +362,14 @@ class TestChargesWithoutSubExcluded:
         p0 = activity[activity["period"] == 0].iloc[0]
         assert p0["period_revenue"] == 198.0  # same as without extra charge
 
+    def test_nan_subscription_id_excluded(self):
+        """Charges with NaN subscription_id must be excluded."""
+        charges = _make_charges(subscription_id=[None, None, None, None, None])
+        activity, _, _ = build_cohort_performance(
+            charges, _make_orders(), _make_subscriptions()
+        )
+        assert activity.empty
+
 
 class TestMonthlyIntervalFilter:
     """Monthly interval still works (interval is metadata from subscriptions)."""
@@ -412,16 +422,15 @@ class TestProductFilter:
 
 
 class TestCombinedCohort:
-    """combined_cohort flag treats all subscriptions as one cohort."""
+    """combined_cohort=True (default) treats all subs as one cohort.
+    Per-period cohort splitting is handled by build_cohort_heatmap()."""
 
-    def test_combined_cohort_true(self):
-        charges = _make_charges()
-        orders = _make_orders()
-        subs = _make_subscriptions()
-        activity, _, _ = build_cohort_performance(
-            charges, orders, subs, combined_cohort=True,
+    def test_combined_cohort_flag_accepted(self):
+        """Function accepts combined_cohort keyword without error."""
+        activity, renewal_rates, stick_rates = build_cohort_performance(
+            _make_charges(), _make_orders(), _make_subscriptions(),
+            combined_cohort=True,
         )
         assert not activity.empty
-        # Should still work the same — all subs combined
-        p0 = activity[activity["period"] == 0].iloc[0]
-        assert p0["active_subscribers"] == 2
+        # All subs in one cohort — same result as default
+        assert activity.iloc[0]["active_subscribers"] == 2
