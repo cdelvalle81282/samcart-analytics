@@ -71,9 +71,13 @@ if not products_df.empty and "name" in products_df.columns:
             product_name_to_id[name] = pid
             product_options.append(name)
 elif not subs_df.empty and "product_name" in subs_df.columns:
-    # Fallback: derive from subscriptions (no product_id available)
-    for name in subs_df["product_name"].dropna().unique():
-        product_options.append(str(name))
+    # Fallback: derive from subscriptions (product_id + product_name)
+    for _, row in subs_df[["product_id", "product_name"]].dropna().drop_duplicates("product_name").iterrows():
+        name = str(row["product_name"])
+        pid = str(row["product_id"])
+        if name not in product_name_to_id:
+            product_name_to_id[name] = pid
+            product_options.append(name)
 
 selected_product = col_f1.selectbox("Filter by Product", product_options)
 
@@ -104,9 +108,9 @@ if selected_interval != "All Intervals":
 # ------------------------------------------------------------------
 
 filtered_subs = subs_df.copy()
-if selected_product != "All Products":
+if product_filter is not None:
     filtered_subs = filtered_subs[
-        filtered_subs["product_name"] == selected_product
+        filtered_subs["product_id"].astype(str) == str(product_filter)
     ]
 if selected_interval != "All Intervals":
     filtered_subs = filtered_subs[
