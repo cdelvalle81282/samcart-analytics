@@ -237,7 +237,7 @@ def build_cohort_performance(
     *,
     product_filter: str | None = None,
     interval_filter: str | None = None,
-    combined_cohort: bool = False,
+
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Charge-based cohort performance analysis for subscription charges.
@@ -317,7 +317,8 @@ def build_cohort_performance(
     df["is_refund"] = _is_refund_charge(df["status"])
 
     # --- 6. Rank charges per subscription by created_at ascending ---
-    df["created_at_ts"] = pd.to_datetime(df["created_at"], utc=True)
+    df["created_at_ts"] = pd.to_datetime(df["created_at"], utc=True, errors="coerce")
+    df = df.dropna(subset=["created_at_ts"])
     df = df.sort_values(["subscription_id", "created_at_ts"])
     df["rank"] = df.groupby("subscription_id").cumcount() + 1
     df["period"] = df["rank"] - 1  # Rank 1 = Period 0

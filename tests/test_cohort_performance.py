@@ -421,16 +421,14 @@ class TestProductFilter:
         assert activity.empty
 
 
-class TestCombinedCohort:
-    """combined_cohort=True (default) treats all subs as one cohort.
+class TestAllSubsInOneCohort:
+    """Default behavior treats all qualifying subs as one cohort.
     Per-period cohort splitting is handled by build_cohort_heatmap()."""
 
-    def test_combined_cohort_flag_accepted(self):
-        """Function accepts combined_cohort keyword without error."""
-        activity, renewal_rates, stick_rates = build_cohort_performance(
+    def test_all_subs_combined(self):
+        """All subscriptions are in one cohort by default."""
+        activity, _, _ = build_cohort_performance(
             _make_charges(), _make_orders(), _make_subscriptions(),
-            combined_cohort=True,
         )
         assert not activity.empty
-        # All subs in one cohort — same result as default
         assert activity.iloc[0]["active_subscribers"] == 2
