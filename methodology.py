@@ -63,25 +63,54 @@ CUSTOMER_LOOKUP_METHODOLOGY = """
 """
 
 COHORT_RETENTION_METHODOLOGY = """
-### How Metrics Are Calculated
+### How Cohort Performance Is Calculated
 
-**Cohort Assignment**
-- Source: `subscriptions` table
-- Each subscription is assigned to a cohort based on its `created_at` month
+**Data Source**
+- Source of truth: `charges` table (actual billing events, not subscription status)
+- Charges are linked to subscriptions via `subscription_id`
+- Only subscription-linked charges are included (one-time purchases excluded)
 
-**Retention Calculation**
-- For each cohort, tracks how many subscriptions are still active at month 0, 1, 2, ... N
-- Active subscriptions (no `canceled_at`) are right-censored: counted as retained through the current month
-- Canceled subscriptions use their `canceled_at` date to determine when they churned
-- Retention % = `(subscriptions active at month N) / (cohort size) * 100`
+**Billing Cycle Periods**
+- For each subscription, charges are ranked by date: rank 1 = Period 0 (initial purchase), rank 2 = Period 1 (first renewal), etc.
+- Each period represents one billing cycle — the label adapts to the subscription interval:
+  - Weekly subs: Week 0, Week 1, Week 2, ...
+  - Monthly subs: Month 0, Month 1, Month 2, ...
+  - Yearly subs: Year 0, Year 1, Year 2, ...
 
-**Churn Rate**
-- `canceled subscriptions / total subscriptions * 100`
-- Canceled includes both "canceled" and "cancelled" spellings
+**Charge Classification**
+- Successful: status is NULL/empty (SamCart default), or in {charged, succeeded, paid, complete}
+- Refund: status in {refunded, partially_refunded, refund}
+- Revenue uses net realized amount: `amount - refund_amount` for partial refunds
+
+**Activity Summary**
+- Active Subscribers: count of unique subscriptions with a successful charge in this period
+- Renewals: active subscribers in periods > 0
+- Initial Charges: active subscribers in period 0
+- Period Revenue: sum of net charge amounts for successful charges
+- Refunds This Period: unique subscriptions with a refund charge in this period
+
+**Renewal Rate**
+- Formula: `Active(Period N) / Active(Period N-1) × 100`
+- Measures period-over-period retention
+
+**Stick Rate**
+- Formula: `Active(Period N) / Cohort Size × 100`
+- Measures cumulative retention from original cohort
+
+**Refund Rate**
+- Formula: `Cumulative Refunds / Cohort Size × 100`
+
+**Churn + Refund Rate**
+- Formula: `(Dropped + Cumulative Refunds) / Cohort Size × 100`
+- Gives full picture of lost subscribers
+
+**Cohort Modes**
+- Per-period: groups subscriptions by the month of their initial charge
+- Combined: all subscriptions in one cohort regardless of when they joined
 
 **Filters**
-- Product filter: filters subscriptions by `product_name`
-- Interval filter: filters by billing interval (monthly, yearly, etc.)
+- Product: filters charges by product
+- Interval: filters by subscription billing interval (weekly, monthly, yearly, etc.)
 """
 
 PRODUCT_LTV_METHODOLOGY = """
