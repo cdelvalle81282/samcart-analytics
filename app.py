@@ -6,7 +6,8 @@ import plotly.express as px
 import streamlit as st
 
 from analytics import monthly_revenue_summary
-from auth import require_auth
+from auth import is_admin, require_auth
+from pii_access import check_pii_access
 from export import cleanup_old_exports
 from methodology import API_DATA_DICTIONARY, DASHBOARD_METHODOLOGY
 from samcart_api import SamCartAPIError
@@ -182,7 +183,9 @@ else:
 # Recent orders
 st.subheader("Recent Orders")
 if not orders_df.empty:
-    display_cols = ["created_at", "customer_email", "product_name", "total"]
+    _user = st.session_state.get("username", "")
+    _can_see_pii = is_admin(_user) or check_pii_access(_user)
+    display_cols = ["created_at", "customer_email", "product_name", "total"] if _can_see_pii else ["created_at", "product_name", "total"]
     available_cols = [c for c in display_cols if c in orders_df.columns]
     st.dataframe(
         orders_df[available_cols].head(20),
