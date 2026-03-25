@@ -155,11 +155,12 @@ else
     echo "    sudo certbot --nginx -d ${DOMAIN}"
 fi
 
-# ── 8. Cron for daily sync ────────────────────────────────────────────
-echo "[8/8] Setting up daily sync cron..."
-CRON_CMD="0 12 * * * cd ${APP_DIR} && ${APP_DIR}/venv/bin/python sync_job.py >> ${APP_DIR}/sync.log 2>&1"
-(sudo -u deploy crontab -l 2>/dev/null | grep -v "sync_job.py"; echo "$CRON_CMD") | sudo -u deploy crontab -
-echo "  Cron installed (daily at noon UTC / 7AM EST)."
+# ── 8. Cron for daily sync + reports ──────────────────────────────────
+echo "[8/8] Setting up daily sync & report crons..."
+SYNC_CRON="0 12 * * * cd ${APP_DIR} && ${APP_DIR}/venv/bin/python sync_job.py >> ${APP_DIR}/sync.log 2>&1"
+REPORT_CRON="30 12 * * * cd ${APP_DIR} && ${APP_DIR}/venv/bin/python report_runner.py >> /var/log/samcart-reports.log 2>&1"
+(sudo -u deploy crontab -l 2>/dev/null | grep -v "sync_job.py" | grep -v "report_runner.py"; echo "$SYNC_CRON"; echo "$REPORT_CRON") | sudo -u deploy crontab -
+echo "  Cron installed: sync at noon UTC, reports at 12:30 UTC."
 
 # ── Done ───────────────────────────────────────────────────────────────
 echo ""
@@ -176,3 +177,4 @@ echo ""
 echo "Logs:"
 echo "  journalctl -u ${APP_NAME} -f        # Streamlit logs"
 echo "  tail -f ${APP_DIR}/sync.log          # Sync logs"
+echo "  tail -f /var/log/samcart-reports.log # Report logs"
