@@ -12,7 +12,7 @@ import streamlit as st
 from samcart_api import SamCartClient, normalize_ts, safe_float, safe_int
 
 
-_ALLOWED_TABLES = frozenset({"orders", "customers", "subscriptions", "charges", "products", "sync_meta", "audit_log"})
+_ALLOWED_TABLES = frozenset({"orders", "customers", "subscriptions", "charges", "products", "sync_meta", "audit_log", "pii_access_requests"})
 
 
 def _validate_table(table_name: str) -> str:
