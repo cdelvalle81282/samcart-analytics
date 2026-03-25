@@ -6,7 +6,7 @@ import streamlit as st
 
 from analytics import calculate_customer_ltv
 from auth import is_admin, require_auth
-from email_sender import _get_email_config, send_approval_email
+from email_sender import get_admin_email, send_approval_email
 from export import render_export_buttons
 from methodology import API_DATA_DICTIONARY, CUSTOMER_LOOKUP_METHODOLOGY
 from pii_access import check_pii_access, generate_approval_token, request_pii_access
@@ -32,8 +32,7 @@ if not is_admin(username) and not check_pii_access(username):
         try:
             rid = request_pii_access(username, "customer_lookup")
             token = generate_approval_token(rid)
-            cfg = _get_email_config()
-            admin_email = cfg["admin_email"]
+            admin_email = get_admin_email()
             if admin_email:
                 send_approval_email(
                     admin_email, username, "Customer Lookup", rid, token

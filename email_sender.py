@@ -4,6 +4,7 @@ import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html import escape
 
 import streamlit as st
 
@@ -20,6 +21,12 @@ def _get_email_config():
         "app_password": cfg.get("app_password", ""),
         "admin_email": cfg.get("admin_email", ""),
     }
+
+
+def get_admin_email() -> str:
+    """Return the configured admin email address."""
+    cfg = _get_email_config()
+    return cfg.get("admin_email", "")
 
 
 def _get_base_url():
@@ -48,8 +55,8 @@ def send_approval_email(
     html = f"""\
     <html><body>
     <h2>PII Access Request</h2>
-    <p><strong>User:</strong> {requester_username}</p>
-    <p><strong>Resource:</strong> {resource}</p>
+    <p><strong>User:</strong> {escape(requester_username)}</p>
+    <p><strong>Resource:</strong> {escape(resource)}</p>
     <p>Click below to approve or deny this request. \
 Approval grants 30 minutes of PII access.</p>
     <p>

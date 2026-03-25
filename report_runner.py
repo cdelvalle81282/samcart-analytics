@@ -6,6 +6,7 @@ import smtplib
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html import escape
 
 import pandas as pd
 import requests
@@ -53,25 +54,25 @@ def _format_html_report(
     if products and "product_name" in data.columns:
         data = data[data["product_name"].isin(products)]
     if data.empty:
-        return f"<h2>{name}</h2><p>No data available.</p>"
+        return f"<h2>{escape(name)}</h2><p>No data available.</p>"
 
-    html = f"<h2>{name}</h2>\n"
+    html = f"<h2>{escape(name)}</h2>\n"
     html += (
         "<table border='1' cellpadding='8' cellspacing='0'"
         " style='border-collapse:collapse;'>\n"
     )
     html += "<tr>"
     for col in data.columns:
-        html += f"<th style='background:#f0f0f0;'>{col}</th>"
+        html += f"<th style='background:#f0f0f0;'>{escape(str(col))}</th>"
     html += "</tr>\n"
     for _, row in data.iterrows():
         html += "<tr>"
         for col in data.columns:
             val = row[col]
             if isinstance(val, float):
-                html += f"<td>${val:,.2f}</td>"
+                html += f"<td>{escape(f'${val:,.2f}')}</td>"
             else:
-                html += f"<td>{val}</td>"
+                html += f"<td>{escape(str(val))}</td>"
         html += "</tr>\n"
     html += "</table>"
     return html

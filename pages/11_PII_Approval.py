@@ -1,5 +1,11 @@
 """PII Access Approval handler -- processes approve/deny links from email."""
 
+# NOTE: This page intentionally has NO require_auth() call.
+# It is accessed via email links by admins who may not be logged in.
+# Security is provided by HMAC-SHA256 token validation — without a valid
+# token, no action can be taken. This is a deliberate design tradeoff
+# for usability (one-click approve/deny from email).
+
 import streamlit as st
 
 from pii_access import approve_request, deny_request, validate_token
