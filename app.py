@@ -1,5 +1,7 @@
 """SamCart Analytics Dashboard — main entry point with sync controls and overview."""
 
+import logging
+
 import plotly.express as px
 import streamlit as st
 
@@ -10,6 +12,8 @@ from methodology import API_DATA_DICTIONARY, DASHBOARD_METHODOLOGY
 from samcart_api import SamCartAPIError
 from shared import get_cache, get_client
 from version import LAST_UPDATED, VERSION
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(
     page_title="SamCart Analytics",
@@ -39,8 +43,9 @@ else:
             st.sidebar.success("Connected to SamCart")
         else:
             st.sidebar.error("Invalid API key")
-    except Exception as e:
-        st.sidebar.warning(f"Could not verify API key: {type(e).__name__}: {e}")
+    except Exception:
+        logger.exception("API key verification failed")
+        st.sidebar.warning("Could not verify API key. Check your configuration.")
 
 # Sync controls
 st.sidebar.markdown("---")
@@ -65,10 +70,12 @@ if sync_btn:
                 st.success(f"Synced {total:,} records")
                 # Clear cached DataFrames so pages get fresh data
                 st.cache_data.clear()
-    except SamCartAPIError as e:
-        st.sidebar.error(f"SamCart API error {e.status_code}")
-    except Exception as e:
-        st.sidebar.error(f"Sync failed: {type(e).__name__}")
+    except SamCartAPIError:
+        logger.exception("SamCart API error during sync")
+        st.sidebar.error("Sync failed due to an API error. Check logs for details.")
+    except Exception:
+        logger.exception("Unexpected error during sync")
+        st.sidebar.error("Sync failed unexpectedly. Check logs for details.")
     finally:
         st.session_state.sync_running = False
 

@@ -1,5 +1,6 @@
 """Report 4: Daily Metrics — new customers, sales, refunds, renewals by product."""
 
+import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -15,6 +16,8 @@ from auth import require_auth
 from export import render_export_buttons
 from methodology import API_DATA_DICTIONARY, DAILY_METRICS_METHODOLOGY
 from shared import get_cache
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Daily Metrics", page_icon=":chart_with_upwards_trend:", layout="wide")
 
@@ -310,8 +313,9 @@ if sheets_config and sheets_config.get("spreadsheet_id"):
             from gsheets import upload_daily_summary
             upload_daily_summary(filtered, sheets_config.get("spreadsheet_id", ""))
             st.success("Daily summary uploaded to Google Sheets.")
-        except Exception as e:
-            st.error(f"Upload failed: {e}")
+        except Exception:
+            logger.exception("Google Sheets upload failed")
+            st.error("Upload failed. Check logs for details.")
 else:
     st.caption("Google Sheets not configured. Add `[gsheets]` section to `.streamlit/secrets.toml` to enable.")
 

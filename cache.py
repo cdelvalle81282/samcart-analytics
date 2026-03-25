@@ -1,6 +1,8 @@
 """SQLite cache for SamCart data with hybrid sync strategy."""
 
+import os
 import sqlite3
+import stat
 import time as _time
 from datetime import datetime, timedelta, timezone
 
@@ -31,6 +33,9 @@ class SamCartCache:
         self.conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
         self._init_schema()
         self._migrate_schema()
+        # Restrict DB file to owner-only (effective on Linux deployment target)
+        if os.path.exists(self.db_path):
+            os.chmod(self.db_path, stat.S_IRUSR | stat.S_IWUSR)
 
     def _migrate_schema(self):
         """Add new columns to existing tables if missing (idempotent)."""
@@ -516,6 +521,8 @@ class SamCartCache:
 
     def delete_customer_data(self, email: str) -> dict[str, int]:
         """Delete all data for a customer by email across all tables. Returns counts."""
+        if not email:
+            raise ValueError("email is required for GDPR deletion")
         counts = {}
         deletion_pairs = [
             ("orders", "customer_email"),
@@ -524,7 +531,8 @@ class SamCartCache:
             ("charges", "customer_email"),
         ]
         for table, col in deletion_pairs:
-            assert table in _ALLOWED_TABLES, f"Invalid table in deletion pair: {table}"
+            if table not in _ALLOWED_TABLES:
+                raise ValueError(f"Invalid table in deletion pair: {table}")
             cur = self.conn.execute(
                 f"DELETE FROM [{table}] WHERE [{col}] = ?", (email,)
             )
