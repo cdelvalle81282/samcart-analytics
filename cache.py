@@ -12,7 +12,7 @@ import streamlit as st
 from samcart_api import SamCartClient, normalize_ts, safe_float, safe_int
 
 
-_ALLOWED_TABLES = frozenset({"orders", "customers", "subscriptions", "charges", "products", "sync_meta"})
+_ALLOWED_TABLES = frozenset({"orders", "customers", "subscriptions", "charges", "products", "sync_meta", "audit_log"})
 
 
 def _validate_table(table_name: str) -> str:
@@ -133,6 +133,18 @@ class SamCartCache:
                 last_synced_at TEXT,
                 record_count INTEGER
             );
+
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                username TEXT NOT NULL,
+                ip_address TEXT,
+                action TEXT NOT NULL,
+                resource TEXT,
+                detail TEXT,
+                outcome TEXT NOT NULL CHECK(outcome IN ('approved','denied','auto','error','pending'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
         """)
         self.conn.commit()
 
@@ -514,6 +526,28 @@ class SamCartCache:
             self.conn,
             params=(email,),
         )
+
+    # ------------------------------------------------------------------
+    # Audit log helpers
+    # ------------------------------------------------------------------
+
+    def log_audit_event(self, username, ip_address, action, resource=None, detail=None, outcome="auto"):
+        """Insert an audit log event."""
+        self.conn.execute(
+            "INSERT INTO audit_log (username, ip_address, action, resource, detail, outcome) VALUES (?, ?, ?, ?, ?, ?)",
+            (username, ip_address, action, resource, detail, outcome),
+        )
+        self.conn.commit()
+
+    def get_audit_log_df(self, days=30, username=None):
+        """Return audit log as DataFrame, optionally filtered."""
+        query = "SELECT * FROM audit_log WHERE timestamp >= datetime('now', ?)"
+        params = [f"-{days} days"]
+        if username:
+            query += " AND username = ?"
+            params.append(username)
+        query += " ORDER BY timestamp DESC"
+        return pd.read_sql_query(query, self.conn, params=params)
 
     # ------------------------------------------------------------------
     # GDPR / CCPA deletion

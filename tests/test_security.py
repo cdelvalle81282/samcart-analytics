@@ -22,6 +22,7 @@ class TestTableValidation:
         assert _validate_table("charges") == "charges"
         assert _validate_table("products") == "products"
         assert _validate_table("sync_meta") == "sync_meta"
+        assert _validate_table("audit_log") == "audit_log"
 
     def test_invalid_table_raises(self):
         from cache import _validate_table
