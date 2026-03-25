@@ -1,19 +1,63 @@
 """Report 1: Customer Lookup with LTV."""
 
+import logging
+
 import streamlit as st
 
 from analytics import calculate_customer_ltv
-from auth import require_auth
+from auth import is_admin, require_auth
+from email_sender import _get_email_config, send_approval_email
 from export import render_export_buttons
 from methodology import API_DATA_DICTIONARY, CUSTOMER_LOOKUP_METHODOLOGY
-
+from pii_access import check_pii_access, generate_approval_token, request_pii_access
 from shared import get_cache
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Customer Lookup", page_icon=":bust_in_silhouette:", layout="wide")
 
 require_auth()
 
 st.title("Customer Lookup")
+
+# ------------------------------------------------------------------
+# PII access gate — non-admins need approved PII access
+# ------------------------------------------------------------------
+username = st.session_state.get("username", "")
+
+if not is_admin(username) and not check_pii_access(username):
+    st.warning("This page contains personally identifiable information (PII).")
+    st.info("You need PII access approval to view this page.")
+    if st.button("Request PII Access"):
+        try:
+            rid = request_pii_access(username, "customer_lookup")
+            token = generate_approval_token(rid)
+            cfg = _get_email_config()
+            admin_email = cfg["admin_email"]
+            if admin_email:
+                send_approval_email(
+                    admin_email, username, "Customer Lookup", rid, token
+                )
+            cache = get_cache()
+            cache.log_audit_event(
+                username,
+                "unknown",
+                "pii_request",
+                "customer_lookup",
+                f"request_id={rid}",
+                "pending",
+            )
+            st.success(
+                "Access request sent to administrator. "
+                "You'll be notified when approved."
+            )
+        except Exception:
+            logger.exception("PII request failed")
+            st.error("Failed to send request. Please try again.")
+    st.stop()
+
+if not is_admin(username):
+    st.info("PII access active.")
 
 cache = get_cache()
 

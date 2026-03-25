@@ -87,14 +87,24 @@ def render_export_buttons(df: pd.DataFrame, filename_base: str, key_prefix: str 
     if "@" in filename_base:
         filename_base = "export"
 
+    # Check whether the current user is allowed to include PII in exports
+    from auth import is_admin
+    from pii_access import check_pii_access
+
+    current_user = st.session_state.get("username", "")
+    can_access_pii = is_admin(current_user) or check_pii_access(current_user)
+
     col1, col2, col3 = st.columns([1, 1, 1])
 
-    include_pii = col3.checkbox(
-        "Include PII",
-        value=False,
-        key=f"{key_prefix}_include_pii",
-        help="Include phone, email, and address columns in export",
-    )
+    if can_access_pii:
+        include_pii = col3.checkbox(
+            "Include PII",
+            value=False,
+            key=f"{key_prefix}_include_pii",
+            help="Include phone, email, and address columns in export",
+        )
+    else:
+        include_pii = False
 
     excel_data = export_to_excel(df, include_pii=include_pii)
     col1.download_button(
