@@ -42,13 +42,14 @@ class SamCartCache:
             ("charges", "refund_date", "TEXT"),
         ]
         for table, column, col_type in migrations:
+            safe_table = _validate_table(table)
             existing = {
                 row[1]
-                for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+                for row in self.conn.execute(f"PRAGMA table_info({safe_table})").fetchall()
             }
             if column not in existing:
                 self.conn.execute(
-                    f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+                    f"ALTER TABLE {safe_table} ADD COLUMN {column} {col_type}"
                 )
         self.conn.commit()
 
