@@ -56,3 +56,14 @@ def require_auth():
 
     # Authenticated — render logout in sidebar
     authenticator.logout("Logout", "sidebar")
+
+
+def get_user_role(username: str) -> str:
+    """Return 'admin' or 'viewer'. Defaults to 'viewer' if not set."""
+    users = st.secrets.get("auth", {}).get("credentials", {}).get("usernames", {})
+    return users.get(username, {}).get("role", "viewer")
+
+
+def is_admin(username: str) -> bool:
+    """Check if user has admin role."""
+    return get_user_role(username) == "admin"
