@@ -34,10 +34,14 @@ def require_auth():
         st.stop()
         return
 
+    cookie_key = auth_config.get("cookie_key")
+    if not cookie_key:
+        raise ValueError("cookie_key must be set in [auth] section of secrets.toml")
+
     authenticator = stauth.Authenticate(
         credentials=credentials,
         cookie_name=auth_config.get("cookie_name", "samcart_analytics"),
-        cookie_key=auth_config.get("cookie_key", "default_key"),
+        cookie_key=cookie_key,
         cookie_expiry_days=auth_config.get("cookie_expiry_days", 7),
     )
 
