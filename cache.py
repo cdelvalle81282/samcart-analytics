@@ -501,7 +501,15 @@ class SamCartCache:
         ))
 
         # Refunds: update charges with refund amounts/dates from /refunds endpoint
-        _timed_sync("refunds", 0.65, lambda: self._sync_refunds(client, headless=headless))
+        if headless:
+            print("Syncing refunds...")
+        else:
+            progress.progress(0.65, text="Syncing refunds...")
+        t0 = _time.time()
+        refund_list = self._sync_refunds(client, headless=headless)
+        elapsed = _time.time() - t0
+        if headless:
+            print(f"  refunds: {len(refund_list)} records in {elapsed:.1f}s")
 
         # Orders: incremental with 1-hour overlap
         since = None
