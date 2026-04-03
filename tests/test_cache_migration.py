@@ -119,11 +119,12 @@ class TestMigration:
 
 
 class TestChargeReUpsert:
-    """Charge synced without refund, then re-synced with refund metadata."""
+    """Charge upsert preserves refund fields managed by _sync_refunds."""
 
-    def test_charge_updates_with_refund_fields(self, fresh_cache):
-        # First sync: charge without refund
-        charge_v1 = {
+    def test_upsert_charges_does_not_clobber_refund_fields(self, fresh_cache):
+        """_upsert_charges should preserve existing refund_amount/refund_date."""
+        # First: insert charge via _upsert_charges
+        charge = {
             "id": "ch_001",
             "order_id": "ord_001",
             "subscription_rebill_id": "sub_001",
@@ -131,22 +132,18 @@ class TestChargeReUpsert:
             "total": 5000,  # $50.00 in cents
             "charge_refund_status": "",
             "created_at": "2024-01-15T10:00:00Z",
-            "refund_amount": 0,
-            "refund_date": None,
         }
-        fresh_cache._upsert_charges([charge_v1])
+        fresh_cache._upsert_charges([charge])
         fresh_cache.conn.commit()
 
-        row = fresh_cache.conn.execute(
-            "SELECT amount, status, refund_amount, refund_date FROM charges WHERE id = ?",
-            ("ch_001",),
-        ).fetchone()
-        assert row[0] == 50.0  # $50
-        assert row[1] == ""
-        assert row[2] == 0.0
-        assert row[3] is None
+        # Simulate _sync_refunds writing refund data directly
+        fresh_cache.conn.execute(
+            "UPDATE charges SET refund_amount = ?, refund_date = ? WHERE id = ?",
+            (25.0, "2024-02-10T12:00:00Z", "ch_001"),
+        )
+        fresh_cache.conn.commit()
 
-        # Second sync: same charge now refunded
+        # Re-upsert the same charge (simulates next sync cycle)
         charge_v2 = {
             "id": "ch_001",
             "order_id": "ord_001",
@@ -155,8 +152,6 @@ class TestChargeReUpsert:
             "total": 5000,
             "charge_refund_status": "partially_refunded",
             "created_at": "2024-01-15T10:00:00Z",
-            "refund_amount": 2500,  # $25 refund in cents
-            "refund_date": "2024-02-10T12:00:00Z",
         }
         fresh_cache._upsert_charges([charge_v2])
         fresh_cache.conn.commit()
@@ -166,9 +161,9 @@ class TestChargeReUpsert:
             ("ch_001",),
         ).fetchone()
         assert row[0] == 50.0  # amount unchanged
-        assert row[1] == "partially_refunded"
-        assert row[2] == 25.0  # $25 refund
-        assert row[3] is not None  # refund_date populated
+        assert row[1] == "partially_refunded"  # status updated
+        assert row[2] == 25.0  # refund_amount preserved (not clobbered)
+        assert row[3] == "2024-02-10T12:00:00Z"  # refund_date preserved
 
 
 class TestSyncBehavior:
@@ -244,8 +239,6 @@ class TestSyncSafety:
             "total": 5000,
             "charge_refund_status": "",
             "created_at": "2024-01-15T10:00:00Z",
-            "refund_amount": 0,
-            "refund_date": None,
         }])
         fresh_cache.conn.commit()
 

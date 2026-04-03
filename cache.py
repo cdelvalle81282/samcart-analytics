@@ -295,17 +295,23 @@ class SamCartCache:
             )
 
     def _upsert_charges(self, charges: list[dict], customer_map: dict | None = None):
-        """INSERT OR REPLACE charges."""
+        """Upsert charges, preserving refund fields managed by _sync_refunds."""
         customer_map = customer_map or {}
         for ch in charges:
             customer_id = str(ch.get("customer_id", ""))
             customer_email = customer_map.get(customer_id, "")
 
             self.conn.execute(
-                """INSERT OR REPLACE INTO charges
-                   (id, order_id, subscription_id, customer_email, amount, status, created_at,
-                    refund_amount, refund_date)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO charges
+                   (id, order_id, subscription_id, customer_email, amount, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                       order_id=excluded.order_id,
+                       subscription_id=excluded.subscription_id,
+                       customer_email=excluded.customer_email,
+                       amount=excluded.amount,
+                       status=excluded.status,
+                       created_at=excluded.created_at""",
                 (
                     str(ch.get("id", "")),
                     str(ch.get("order_id", "") or ""),
@@ -314,10 +320,51 @@ class SamCartCache:
                     safe_float(ch.get("total", ch.get("amount"))) / 100,
                     ch.get("charge_refund_status", ch.get("status", "")),
                     normalize_ts(ch.get("created_at")),
-                    safe_float(ch.get("refund_amount")) / 100,
-                    normalize_ts(ch.get("refund_date")),
                 ),
             )
+
+    # ------------------------------------------------------------------
+    # Refund sync — updates charges with refund data from /refunds
+    # ------------------------------------------------------------------
+
+    def _sync_refunds(self, client: SamCartClient, headless: bool = False):
+        """Fetch refunds and update charges with aggregated refund amounts/dates."""
+        if headless:
+            print("Fetching refunds...")
+        refunds = client.get_refunds()
+        if not refunds:
+            return []
+
+        # Group refunds by charge_id: sum amounts, take latest date
+        charge_refunds: dict[str, dict] = {}
+        for r in refunds:
+            charge_id = str(r.get("charge_id", ""))
+            if not charge_id:
+                continue
+            amount = safe_float(r.get("refund_amount", r.get("amount"))) / 100
+            refund_date = normalize_ts(r.get("created_at"))
+
+            if charge_id in charge_refunds:
+                charge_refunds[charge_id]["amount"] += amount
+                if refund_date and (
+                    not charge_refunds[charge_id]["date"]
+                    or refund_date > charge_refunds[charge_id]["date"]
+                ):
+                    charge_refunds[charge_id]["date"] = refund_date
+            else:
+                charge_refunds[charge_id] = {"amount": amount, "date": refund_date}
+
+        # Update charges table
+        for charge_id, data in charge_refunds.items():
+            self.conn.execute(
+                "UPDATE charges SET refund_amount = ?, refund_date = ? WHERE id = ?",
+                (data["amount"], data["date"], charge_id),
+            )
+        self.conn.commit()
+
+        if headless:
+            print(f"  Updated {len(charge_refunds)} charges with refund data")
+        return refunds
 
     # ------------------------------------------------------------------
     # Sync engine — hybrid strategy
@@ -452,6 +499,9 @@ class SamCartCache:
             "charges", client.get_charges, self._upsert_charges,
             force_full=True, customer_map=customer_map, headless=headless,
         ))
+
+        # Refunds: update charges with refund amounts/dates from /refunds endpoint
+        _timed_sync("refunds", 0.65, lambda: self._sync_refunds(client, headless=headless))
 
         # Orders: incremental with 1-hour overlap
         since = None
