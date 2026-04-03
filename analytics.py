@@ -22,8 +22,8 @@ REFUND_CHARGE_STATUSES = {"refunded", "partially_refunded", "refund"}
 
 def _is_successful_charge(status_series: pd.Series) -> pd.Series:
     """A charge is successful if status is NULL/empty OR in the whitelist."""
-    lower = status_series.str.lower()
-    return lower.isna() | (lower == "") | lower.isin(SUCCESSFUL_CHARGE_STATUSES)
+    lower = status_series.fillna("").str.lower().str.strip()
+    return lower.isin(SUCCESSFUL_CHARGE_STATUSES) | (lower == "")
 
 
 def _is_refund_charge(status_series: pd.Series) -> pd.Series:
@@ -164,70 +164,6 @@ def calculate_customer_ltv(
     result["estimated_ltv"] = result["total_spend"]  # Current realized LTV
 
     return result.sort_values("total_spend", ascending=False).reset_index(drop=True)
-
-
-def build_cohort_retention(
-    subscriptions_df: pd.DataFrame,
-    charges_df: pd.DataFrame,
-) -> pd.DataFrame:
-    """
-    Cohort retention analysis.
-
-    Groups subscribers by signup month. For each cohort, tracks % still active
-    at month 1, 2, 3, ... N. Active subs are right-censored (counted as
-    retained through current month).
-
-    Returns pivot table: rows=cohort month, cols=months since signup, values=retention %.
-    """
-    if subscriptions_df.empty:
-        return pd.DataFrame()
-
-    subs = subscriptions_df.copy()
-    subs["created_at"] = _to_eastern(subs["created_at"])
-    subs = subs.dropna(subset=["created_at"])
-
-    if subs.empty:
-        return pd.DataFrame()
-
-    # Assign cohort (Eastern time)
-    subs["cohort"] = subs["created_at"].dt.to_period("M")
-
-    # Determine end date per subscription
-    now = pd.Timestamp(datetime.now(ET))
-    subs["canceled_at"] = pd.to_datetime(subs["canceled_at"], utc=True).dt.tz_convert(ET)
-    subs["end_date"] = subs["canceled_at"].fillna(now)
-
-    # Calculate months active
-    subs["months_active"] = (
-        (subs["end_date"].dt.to_period("M") - subs["cohort"])
-        .apply(lambda x: max(x.n, 0) if pd.notna(x) else 0)
-    )
-
-    # Build retention matrix
-    cohorts = subs.groupby("cohort")
-
-    # Find the max number of periods
-    max_periods = int(subs["months_active"].max()) + 1 if not subs["months_active"].isna().all() else 1
-    max_periods = min(max_periods, 24)  # Cap at 24 months for display
-
-    retention_data = []
-    for cohort, group in cohorts:
-        size = len(group)
-        if size == 0:
-            continue
-        row = {"cohort": str(cohort), "cohort_size": size}
-        for period in range(max_periods):
-            active_count = (group["months_active"] >= period).sum()
-            row[period] = active_count / size * 100
-        retention_data.append(row)
-
-    if not retention_data:
-        return pd.DataFrame()
-
-    result = pd.DataFrame(retention_data)
-    result = result.set_index("cohort")
-
-    return result
 
 
 def build_cohort_performance(

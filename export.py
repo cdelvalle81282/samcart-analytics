@@ -13,10 +13,6 @@ EXPORTS_DIR = Path("exports")
 PII_COLUMNS = {"phone", "billing_city", "billing_state", "billing_country", "email", "customer_email", "first_name", "last_name"}
 
 
-def _ensure_exports_dir():
-    EXPORTS_DIR.mkdir(exist_ok=True)
-
-
 def _strip_pii(df: pd.DataFrame, include_pii: bool) -> pd.DataFrame:
     """Remove PII columns if include_pii is False."""
     if include_pii:
