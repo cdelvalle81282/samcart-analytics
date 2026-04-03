@@ -244,7 +244,7 @@ The dashboard syncs data from the [SamCart v1 REST API](https://api.samcart.com/
 | `created_at` | Yes | `created_at` | Subscription start date (UTC) |
 | `end_date` | Yes | `canceled_at` | Set when status = canceled |
 | `trial_days` | Yes | `trial_days` | Trial period length (0 = no trial) |
-| `next_bill_date` | Yes | `next_bill_date` | Next scheduled charge date (UTC) |
+| `next_rebilling_date` | Yes | `next_bill_date` | Next scheduled charge date (UTC) |
 | `billing_cycle_count` | Yes | `billing_cycle_count` | Number of completed billing cycles |
 
 ---

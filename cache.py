@@ -276,7 +276,7 @@ class SamCartCache:
                     normalize_ts(s.get("created_at")),
                     normalize_ts(canceled_at),
                     safe_int(s.get("trial_days")),
-                    normalize_ts(s.get("next_bill_date")),
+                    normalize_ts(s.get("next_rebilling_date") or s.get("next_bill_date")),
                     safe_int(s.get("billing_cycle_count")),
                 ),
             )
