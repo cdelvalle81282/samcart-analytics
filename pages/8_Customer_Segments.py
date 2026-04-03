@@ -12,11 +12,12 @@ from methodology import (
     MULTI_PRODUCT_METHODOLOGY,
     RFM_METHODOLOGY,
 )
-from shared import get_cache
+from shared import get_cache, render_sync_sidebar
 
 st.set_page_config(page_title="Customer Segments", page_icon=":busts_in_silhouette:", layout="wide")
 
 require_auth()
+render_sync_sidebar()
 
 st.title("Customer Segments")
 

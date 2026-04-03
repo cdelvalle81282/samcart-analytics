@@ -10,13 +10,14 @@ from email_sender import get_admin_email, send_approval_email
 from export import render_export_buttons
 from methodology import API_DATA_DICTIONARY, CUSTOMER_LOOKUP_METHODOLOGY
 from pii_access import check_pii_access, generate_approval_token, request_pii_access
-from shared import get_cache
+from shared import get_cache, render_sync_sidebar
 
 logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Customer Lookup", page_icon=":bust_in_silhouette:", layout="wide")
 
 require_auth()
+render_sync_sidebar()
 
 st.title("Customer Lookup")
 

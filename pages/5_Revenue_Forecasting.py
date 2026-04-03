@@ -12,11 +12,12 @@ from methodology import (
     MRR_WATERFALL_METHODOLOGY,
     REVENUE_FORECAST_METHODOLOGY,
 )
-from shared import get_cache
+from shared import get_cache, render_sync_sidebar
 
 st.set_page_config(page_title="Revenue Forecasting", page_icon=":crystal_ball:", layout="wide")
 
 require_auth()
+render_sync_sidebar()
 
 st.title("Revenue Forecasting")
 

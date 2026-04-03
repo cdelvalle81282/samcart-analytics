@@ -12,7 +12,7 @@ from notifications import (
     NotificationFrequency,
     dispatch_notifications,
 )
-from shared import get_cache
+from shared import get_cache, render_sync_sidebar
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,7 @@ st.set_page_config(
 )
 
 require_auth()
+render_sync_sidebar()
 
 # ------------------------------------------------------------------
 # Admin gate

@@ -15,13 +15,14 @@ from analytics import (
 from auth import require_auth
 from export import render_export_buttons
 from methodology import API_DATA_DICTIONARY, DAILY_METRICS_METHODOLOGY
-from shared import get_cache
+from shared import get_cache, render_sync_sidebar
 
 logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Daily Metrics", page_icon=":chart_with_upwards_trend:", layout="wide")
 
 require_auth()
+render_sync_sidebar()
 
 st.title("Daily Metrics")
 
@@ -268,6 +269,8 @@ with tab5:
 # --- Tab 6: Entry Product LTV ---
 with tab6:
     ltv_df = new_customer_ltv_by_entry_product(orders_df, charges_df, subs_df)
+    if selected_products:
+        ltv_df = ltv_df[ltv_df["product_name"].isin(selected_products)]
     if not ltv_df.empty:
         fig_ltv = px.bar(
             ltv_df,

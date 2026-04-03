@@ -1,11 +1,14 @@
 """Shared singleton resources for use across app.py and all pages."""
 
+import logging
 import os
 
 import streamlit as st
 
 from cache import SamCartCache
-from samcart_api import SamCartClient
+from samcart_api import SamCartAPIError, SamCartClient
+
+logger = logging.getLogger(__name__)
 
 
 @st.cache_resource
@@ -17,3 +20,68 @@ def get_cache() -> SamCartCache:
 def get_client() -> SamCartClient:
     api_key = st.secrets.get("SAMCART_API_KEY", os.environ.get("SAMCART_API_KEY", ""))
     return SamCartClient(api_key)
+
+
+def render_sync_sidebar() -> None:
+    """Render sync controls and cache status in the sidebar.
+
+    Safe to call from any page — uses the shared singleton client/cache.
+    """
+    client = get_client()
+    cache = get_cache()
+
+    st.sidebar.title("SamCart Analytics")
+
+    # Credential check
+    if not client.api_key or client.api_key == "sc_live_YOUR_KEY_HERE":
+        st.sidebar.error("Set your API key in `.streamlit/secrets.toml`")
+    else:
+        try:
+            if client.verify_credentials():
+                st.sidebar.success("Connected to SamCart")
+            else:
+                st.sidebar.error("Invalid API key")
+        except Exception:
+            logger.exception("API key verification failed")
+            st.sidebar.warning("Could not verify API key.")
+
+    # Sync controls
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Data Sync")
+
+    force_full = st.sidebar.checkbox("Force full resync", value=False)
+    sync_btn = st.sidebar.button(
+        "Sync Data",
+        disabled=st.session_state.get("sync_running", False),
+        use_container_width=True,
+    )
+
+    if sync_btn:
+        st.session_state.sync_running = True
+        try:
+            with st.sidebar:
+                valid = client.verify_credentials()
+                if not valid:
+                    st.error("Invalid API key — cannot sync")
+                else:
+                    total = cache.sync_all(client, force_full=force_full)
+                    st.success(f"Synced {total:,} records")
+                    st.cache_data.clear()
+        except SamCartAPIError:
+            logger.exception("SamCart API error during sync")
+            st.sidebar.error("Sync failed due to an API error.")
+        except Exception:
+            logger.exception("Unexpected error during sync")
+            st.sidebar.error("Sync failed unexpectedly.")
+        finally:
+            st.session_state.sync_running = False
+
+    # Sync summary
+    summary = cache.get_sync_summary()
+    if summary:
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Cache Status")
+        for table, meta in sorted(summary.items()):
+            last = meta["last_synced_at"] or "Never"
+            count = meta["record_count"] or 0
+            st.sidebar.caption(f"**{table}**: {count:,} records (synced {last[:16]})")

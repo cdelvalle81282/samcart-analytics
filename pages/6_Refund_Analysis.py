@@ -7,11 +7,12 @@ from analytics import refund_analysis
 from auth import require_auth
 from export import render_export_buttons
 from methodology import API_DATA_DICTIONARY, REFUND_ANALYSIS_METHODOLOGY
-from shared import get_cache
+from shared import get_cache, render_sync_sidebar
 
 st.set_page_config(page_title="Refund Analysis", page_icon=":money_with_wings:", layout="wide")
 
 require_auth()
+render_sync_sidebar()
 
 st.title("Refund Analysis")
 

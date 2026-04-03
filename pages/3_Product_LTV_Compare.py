@@ -9,11 +9,12 @@ from auth import require_auth
 from export import render_export_buttons
 from methodology import API_DATA_DICTIONARY, PRODUCT_LTV_METHODOLOGY
 
-from shared import get_cache
+from shared import get_cache, render_sync_sidebar
 
 st.set_page_config(page_title="Product LTV Compare", page_icon=":package:", layout="wide")
 
 require_auth()
+render_sync_sidebar()
 
 st.title("Product LTV Comparison")
 

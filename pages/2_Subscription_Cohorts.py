@@ -8,7 +8,7 @@ from analytics import build_cohort_heatmap, build_cohort_performance
 from auth import require_auth
 from export import render_export_buttons
 from methodology import API_DATA_DICTIONARY, COHORT_RETENTION_METHODOLOGY
-from shared import get_cache
+from shared import get_cache, render_sync_sidebar
 
 st.set_page_config(
     page_title="Subscription Cohorts",
@@ -17,6 +17,7 @@ st.set_page_config(
 )
 
 require_auth()
+render_sync_sidebar()
 
 st.title("Cohort Performance Report")
 

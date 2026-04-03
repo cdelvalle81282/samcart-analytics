@@ -3,11 +3,12 @@
 import streamlit as st
 
 from auth import is_admin, require_auth
-from shared import get_cache
+from shared import get_cache, render_sync_sidebar
 
 st.set_page_config(page_title="Audit Log", page_icon=":lock:", layout="wide")
 
 require_auth()
+render_sync_sidebar()
 
 # ------------------------------------------------------------------
 # Admin gate

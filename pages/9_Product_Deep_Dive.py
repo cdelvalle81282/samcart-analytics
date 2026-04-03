@@ -16,11 +16,12 @@ from methodology import (
     PRODUCT_MRR_TREND_METHODOLOGY,
     REVENUE_MIX_METHODOLOGY,
 )
-from shared import get_cache
+from shared import get_cache, render_sync_sidebar
 
 st.set_page_config(page_title="Product Deep Dive", page_icon=":package:", layout="wide")
 
 require_auth()
+render_sync_sidebar()
 
 st.title("Product Deep Dive")
 

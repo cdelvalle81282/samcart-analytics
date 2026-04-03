@@ -12,11 +12,12 @@ from methodology import (
     SUBSCRIPTION_AGING_METHODOLOGY,
     TRIAL_CONVERSION_METHODOLOGY,
 )
-from shared import get_cache
+from shared import get_cache, render_sync_sidebar
 
 st.set_page_config(page_title="Subscription Health", page_icon=":heartbeat:", layout="wide")
 
 require_auth()
+render_sync_sidebar()
 
 st.title("Subscription Health")
 
