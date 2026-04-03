@@ -1038,9 +1038,14 @@ def new_customer_ltv_by_entry_product(
     orders_df: pd.DataFrame,
     charges_df: pd.DataFrame,
     subscriptions_df: pd.DataFrame,
+    start_date=None,
+    end_date=None,
 ) -> pd.DataFrame:
     """
     LTV analysis grouped by each customer's entry product (first purchase).
+
+    When start_date/end_date are provided, only customers whose first purchase
+    falls within that range are included. Their LTV still reflects all-time spend.
 
     Returns: product_id, product_name, customer_count, avg_ltv, median_ltv, total_ltv
     """
@@ -1056,7 +1061,15 @@ def new_customer_ltv_by_entry_product(
 
     # Find each customer's first order -> entry product
     first_order_idx = odf.groupby("customer_email")["created_at"].idxmin()
-    first_orders = odf.loc[first_order_idx, ["customer_email", "product_id", "product_name"]]
+    first_orders = odf.loc[first_order_idx, ["customer_email", "created_at", "product_id", "product_name"]]
+
+    # Filter to customers whose entry date falls within the date range
+    if start_date is not None:
+        first_orders = first_orders[first_orders["created_at"].dt.date >= start_date]
+    if end_date is not None:
+        first_orders = first_orders[first_orders["created_at"].dt.date <= end_date]
+
+    first_orders = first_orders.drop(columns=["created_at"])
     first_orders = first_orders.rename(columns={
         "product_id": "entry_product_id",
         "product_name": "entry_product_name",

@@ -268,7 +268,11 @@ with tab5:
 
 # --- Tab 6: Entry Product LTV ---
 with tab6:
-    ltv_df = new_customer_ltv_by_entry_product(orders_df, charges_df, subs_df)
+    ltv_start = date_range[0] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else None
+    ltv_end = date_range[1] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else None
+    ltv_df = new_customer_ltv_by_entry_product(
+        orders_df, charges_df, subs_df, start_date=ltv_start, end_date=ltv_end,
+    )
     if selected_products:
         ltv_df = ltv_df[ltv_df["product_name"].isin(selected_products)]
     if not ltv_df.empty:
