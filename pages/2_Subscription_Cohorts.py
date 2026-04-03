@@ -7,8 +7,8 @@ import streamlit as st
 from analytics import build_cohort_heatmap, build_cohort_performance
 from auth import require_auth
 from export import render_export_buttons
-from methodology import API_DATA_DICTIONARY, COHORT_RETENTION_METHODOLOGY
-from shared import get_cache, render_sync_sidebar
+from methodology import COHORT_RETENTION_METHODOLOGY
+from shared import load_charges, load_orders, load_products, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(
     page_title="Subscription Cohorts",
@@ -20,31 +20,6 @@ require_auth()
 render_sync_sidebar()
 
 st.title("Cohort Performance Report")
-
-# ------------------------------------------------------------------
-# Cached data loaders
-# ------------------------------------------------------------------
-
-
-@st.cache_data(ttl=300)
-def load_charges():
-    return get_cache().get_charges_df()
-
-
-@st.cache_data(ttl=300)
-def load_subscriptions():
-    return get_cache().get_subscriptions_df()
-
-
-@st.cache_data(ttl=300)
-def load_orders():
-    return get_cache().get_orders_df()
-
-
-@st.cache_data(ttl=300)
-def load_products():
-    return get_cache().get_products_df()
-
 
 charges_df = load_charges()
 subs_df = load_subscriptions()
@@ -332,9 +307,4 @@ if cohort_view == "Per-Period":
 # Methodology & Data Dictionary
 # ------------------------------------------------------------------
 
-st.markdown("---")
-doc_tab1, doc_tab2 = st.tabs(["How It's Calculated", "Available Data Points"])
-with doc_tab1:
-    st.markdown(COHORT_RETENTION_METHODOLOGY)
-with doc_tab2:
-    st.markdown(API_DATA_DICTIONARY)
+render_doc_tabs(COHORT_RETENTION_METHODOLOGY)

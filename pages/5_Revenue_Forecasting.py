@@ -8,11 +8,10 @@ from analytics import mrr_waterfall, revenue_forecast
 from auth import require_auth
 from export import render_export_buttons
 from methodology import (
-    API_DATA_DICTIONARY,
     MRR_WATERFALL_METHODOLOGY,
     REVENUE_FORECAST_METHODOLOGY,
 )
-from shared import get_cache, render_sync_sidebar
+from shared import load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(page_title="Revenue Forecasting", page_icon=":crystal_ball:", layout="wide")
 
@@ -20,16 +19,6 @@ require_auth()
 render_sync_sidebar()
 
 st.title("Revenue Forecasting")
-
-# ------------------------------------------------------------------
-# Cached data loaders
-# ------------------------------------------------------------------
-
-
-@st.cache_data(ttl=300)
-def load_subscriptions():
-    return get_cache().get_subscriptions_df()
-
 
 subs_df = load_subscriptions()
 
@@ -144,6 +133,5 @@ with tab2:
 # Documentation
 # ------------------------------------------------------------------
 
-st.markdown("---")
-with st.expander("Available Data Points"):
-    st.markdown(API_DATA_DICTIONARY)
+_COMBINED_METHODOLOGY = MRR_WATERFALL_METHODOLOGY + "\n\n---\n\n" + REVENUE_FORECAST_METHODOLOGY
+render_doc_tabs(_COMBINED_METHODOLOGY)

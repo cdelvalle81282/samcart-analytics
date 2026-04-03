@@ -4,12 +4,11 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from analytics import _to_eastern, product_ltv_ranking
+from analytics import to_eastern, product_ltv_ranking
 from auth import require_auth
 from export import render_export_buttons
-from methodology import API_DATA_DICTIONARY, PRODUCT_LTV_METHODOLOGY
-
-from shared import get_cache, render_sync_sidebar
+from methodology import PRODUCT_LTV_METHODOLOGY
+from shared import load_orders, load_products, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(page_title="Product LTV Compare", page_icon=":package:", layout="wide")
 
@@ -17,25 +16,6 @@ require_auth()
 render_sync_sidebar()
 
 st.title("Product LTV Comparison")
-
-
-# ------------------------------------------------------------------
-# Cached data loaders
-# ------------------------------------------------------------------
-
-@st.cache_data(ttl=300)
-def load_orders():
-    return get_cache().get_orders_df()
-
-
-@st.cache_data(ttl=300)
-def load_subscriptions():
-    return get_cache().get_subscriptions_df()
-
-
-@st.cache_data(ttl=300)
-def load_products():
-    return get_cache().get_products_df()
 
 
 orders_df = load_orders()
@@ -53,7 +33,7 @@ if orders_df.empty:
 col1, col2 = st.columns(2)
 
 # Date range filter
-orders_df["created_at"] = _to_eastern(orders_df["created_at"])
+orders_df["created_at"] = to_eastern(orders_df["created_at"])
 min_date = orders_df["created_at"].min()
 max_date = orders_df["created_at"].max()
 
@@ -140,9 +120,4 @@ render_export_buttons(ranking, "product_ltv", key_prefix="product")
 # Documentation tabs
 # ------------------------------------------------------------------
 
-st.markdown("---")
-doc_tab1, doc_tab2 = st.tabs(["How It's Calculated", "Available Data Points"])
-with doc_tab1:
-    st.markdown(PRODUCT_LTV_METHODOLOGY)
-with doc_tab2:
-    st.markdown(API_DATA_DICTIONARY)
+render_doc_tabs(PRODUCT_LTV_METHODOLOGY)

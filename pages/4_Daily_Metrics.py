@@ -14,8 +14,8 @@ from analytics import (
 )
 from auth import require_auth
 from export import render_export_buttons
-from methodology import API_DATA_DICTIONARY, DAILY_METRICS_METHODOLOGY
-from shared import get_cache, render_sync_sidebar
+from methodology import DAILY_METRICS_METHODOLOGY
+from shared import load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 logger = logging.getLogger(__name__)
 
@@ -25,26 +25,6 @@ require_auth()
 render_sync_sidebar()
 
 st.title("Daily Metrics")
-
-# ------------------------------------------------------------------
-# Cached data loaders
-# ------------------------------------------------------------------
-
-
-@st.cache_data(ttl=300)
-def load_orders():
-    return get_cache().get_orders_df()
-
-
-@st.cache_data(ttl=300)
-def load_charges():
-    return get_cache().get_charges_df()
-
-
-@st.cache_data(ttl=300)
-def load_subscriptions():
-    return get_cache().get_subscriptions_df()
-
 
 orders_df = load_orders()
 charges_df = load_charges()
@@ -330,9 +310,4 @@ else:
 # Documentation tabs
 # ------------------------------------------------------------------
 
-st.markdown("---")
-doc_tab1, doc_tab2 = st.tabs(["How It's Calculated", "Available Data Points"])
-with doc_tab1:
-    st.markdown(DAILY_METRICS_METHODOLOGY)
-with doc_tab2:
-    st.markdown(API_DATA_DICTIONARY)
+render_doc_tabs(DAILY_METRICS_METHODOLOGY)

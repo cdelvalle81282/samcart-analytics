@@ -11,12 +11,11 @@ from analytics import (
 from auth import require_auth
 from export import render_export_buttons
 from methodology import (
-    API_DATA_DICTIONARY,
     ATTACH_RATE_METHODOLOGY,
     PRODUCT_MRR_TREND_METHODOLOGY,
     REVENUE_MIX_METHODOLOGY,
 )
-from shared import get_cache, render_sync_sidebar
+from shared import load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(page_title="Product Deep Dive", page_icon=":package:", layout="wide")
 
@@ -24,26 +23,6 @@ require_auth()
 render_sync_sidebar()
 
 st.title("Product Deep Dive")
-
-# ------------------------------------------------------------------
-# Cached data loaders
-# ------------------------------------------------------------------
-
-
-@st.cache_data(ttl=300)
-def load_subscriptions():
-    return get_cache().get_subscriptions_df()
-
-
-@st.cache_data(ttl=300)
-def load_orders():
-    return get_cache().get_orders_df()
-
-
-@st.cache_data(ttl=300)
-def load_charges():
-    return get_cache().get_charges_df()
-
 
 subs_df = load_subscriptions()
 orders_df = load_orders()
@@ -195,6 +174,11 @@ with tab3:
 # Documentation
 # ------------------------------------------------------------------
 
-st.markdown("---")
-with st.expander("Available Data Points"):
-    st.markdown(API_DATA_DICTIONARY)
+_COMBINED_METHODOLOGY = (
+    PRODUCT_MRR_TREND_METHODOLOGY
+    + "\n\n---\n\n"
+    + ATTACH_RATE_METHODOLOGY
+    + "\n\n---\n\n"
+    + REVENUE_MIX_METHODOLOGY
+)
+render_doc_tabs(_COMBINED_METHODOLOGY)

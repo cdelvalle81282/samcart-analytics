@@ -7,12 +7,11 @@ from analytics import churn_analysis, subscription_aging, trial_conversion
 from auth import require_auth
 from export import render_export_buttons
 from methodology import (
-    API_DATA_DICTIONARY,
     CHURN_ANALYSIS_METHODOLOGY,
     SUBSCRIPTION_AGING_METHODOLOGY,
     TRIAL_CONVERSION_METHODOLOGY,
 )
-from shared import get_cache, render_sync_sidebar
+from shared import load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(page_title="Subscription Health", page_icon=":heartbeat:", layout="wide")
 
@@ -20,16 +19,6 @@ require_auth()
 render_sync_sidebar()
 
 st.title("Subscription Health")
-
-# ------------------------------------------------------------------
-# Cached data loaders
-# ------------------------------------------------------------------
-
-
-@st.cache_data(ttl=300)
-def load_subscriptions():
-    return get_cache().get_subscriptions_df()
-
 
 subs_df = load_subscriptions()
 
@@ -188,6 +177,11 @@ with tab3:
 # Documentation
 # ------------------------------------------------------------------
 
-st.markdown("---")
-with st.expander("Available Data Points"):
-    st.markdown(API_DATA_DICTIONARY)
+_COMBINED_METHODOLOGY = (
+    CHURN_ANALYSIS_METHODOLOGY
+    + "\n\n---\n\n"
+    + TRIAL_CONVERSION_METHODOLOGY
+    + "\n\n---\n\n"
+    + SUBSCRIPTION_AGING_METHODOLOGY
+)
+render_doc_tabs(_COMBINED_METHODOLOGY)

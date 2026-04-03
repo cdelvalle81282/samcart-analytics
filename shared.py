@@ -85,3 +85,39 @@ def render_sync_sidebar() -> None:
             last = meta["last_synced_at"] or "Never"
             count = meta["record_count"] or 0
             st.sidebar.caption(f"**{table}**: {count:,} records (synced {last[:16]})")
+
+
+# ------------------------------------------------------------------
+# Cached data loaders — shared across all pages
+# ------------------------------------------------------------------
+
+
+@st.cache_data(ttl=300)
+def load_orders():
+    return get_cache().get_orders_df()
+
+
+@st.cache_data(ttl=300)
+def load_charges():
+    return get_cache().get_charges_df()
+
+
+@st.cache_data(ttl=300)
+def load_subscriptions():
+    return get_cache().get_subscriptions_df()
+
+
+@st.cache_data(ttl=300)
+def load_products():
+    return get_cache().get_products_df()
+
+
+def render_doc_tabs(page_methodology: str) -> None:
+    """Render standard How It's Calculated / Available Data Points tabs."""
+    from methodology import API_DATA_DICTIONARY
+    st.markdown("---")
+    doc_tab1, doc_tab2 = st.tabs(["How It's Calculated", "Available Data Points"])
+    with doc_tab1:
+        st.markdown(page_methodology)
+    with doc_tab2:
+        st.markdown(API_DATA_DICTIONARY)

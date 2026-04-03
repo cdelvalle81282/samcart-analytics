@@ -7,12 +7,11 @@ from analytics import customer_concentration, multi_product_buyers, rfm_segmenta
 from auth import require_auth
 from export import render_export_buttons
 from methodology import (
-    API_DATA_DICTIONARY,
     CONCENTRATION_METHODOLOGY,
     MULTI_PRODUCT_METHODOLOGY,
     RFM_METHODOLOGY,
 )
-from shared import get_cache, render_sync_sidebar
+from shared import load_charges, load_orders, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(page_title="Customer Segments", page_icon=":busts_in_silhouette:", layout="wide")
 
@@ -20,21 +19,6 @@ require_auth()
 render_sync_sidebar()
 
 st.title("Customer Segments")
-
-# ------------------------------------------------------------------
-# Cached data loaders
-# ------------------------------------------------------------------
-
-
-@st.cache_data(ttl=300)
-def load_orders():
-    return get_cache().get_orders_df()
-
-
-@st.cache_data(ttl=300)
-def load_charges():
-    return get_cache().get_charges_df()
-
 
 orders_df = load_orders()
 charges_df = load_charges()
@@ -213,6 +197,11 @@ with tab3:
 # Documentation
 # ------------------------------------------------------------------
 
-st.markdown("---")
-with st.expander("Available Data Points"):
-    st.markdown(API_DATA_DICTIONARY)
+_COMBINED_METHODOLOGY = (
+    RFM_METHODOLOGY
+    + "\n\n---\n\n"
+    + MULTI_PRODUCT_METHODOLOGY
+    + "\n\n---\n\n"
+    + CONCENTRATION_METHODOLOGY
+)
+render_doc_tabs(_COMBINED_METHODOLOGY)

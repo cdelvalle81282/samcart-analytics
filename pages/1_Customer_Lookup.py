@@ -8,9 +8,9 @@ from analytics import calculate_customer_ltv
 from auth import is_admin, require_auth
 from email_sender import get_admin_email, send_approval_email
 from export import render_export_buttons
-from methodology import API_DATA_DICTIONARY, CUSTOMER_LOOKUP_METHODOLOGY
+from methodology import CUSTOMER_LOOKUP_METHODOLOGY
 from pii_access import check_pii_access, generate_approval_token, request_pii_access
-from shared import get_cache, render_sync_sidebar
+from shared import get_cache, load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 logger = logging.getLogger(__name__)
 
@@ -60,25 +60,6 @@ if not is_admin(username):
     st.info("PII access active.")
 
 cache = get_cache()
-
-
-# ------------------------------------------------------------------
-# Cached data loaders
-# ------------------------------------------------------------------
-
-@st.cache_data(ttl=300)
-def load_orders():
-    return get_cache().get_orders_df()
-
-
-@st.cache_data(ttl=300)
-def load_charges():
-    return get_cache().get_charges_df()
-
-
-@st.cache_data(ttl=300)
-def load_subscriptions():
-    return get_cache().get_subscriptions_df()
 
 
 orders_df = load_orders()
@@ -183,9 +164,4 @@ else:
 # Documentation tabs
 # ------------------------------------------------------------------
 
-st.markdown("---")
-doc_tab1, doc_tab2 = st.tabs(["How It's Calculated", "Available Data Points"])
-with doc_tab1:
-    st.markdown(CUSTOMER_LOOKUP_METHODOLOGY)
-with doc_tab2:
-    st.markdown(API_DATA_DICTIONARY)
+render_doc_tabs(CUSTOMER_LOOKUP_METHODOLOGY)

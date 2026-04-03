@@ -9,9 +9,13 @@ import pandas as pd
 ET = ZoneInfo("America/New_York")
 
 
-def _to_eastern(series: pd.Series) -> pd.Series:
+def to_eastern(series: pd.Series) -> pd.Series:
     """Convert a UTC datetime series to Eastern time."""
     return pd.to_datetime(series, utc=True).dt.tz_convert(ET)
+
+
+# Keep backward-compatible alias (internal callers use the old name)
+_to_eastern = to_eastern
 
 # Charge status constants
 # Note: SamCart API leaves status NULL for successful charges.
@@ -54,6 +58,16 @@ def _net_charge_amount(df: pd.DataFrame) -> pd.Series:
     net = pd.Series(0.0, index=df.index)
     net[is_collected] = amount[is_collected] - refund[is_collected]
     return net.clip(lower=0)
+
+
+def total_net_revenue(charges_df: pd.DataFrame, orders_df: pd.DataFrame) -> float:
+    """Calculate total net realized revenue from charges, falling back to orders."""
+    if not charges_df.empty:
+        collected = charges_df[_is_collected_charge(charges_df["status"])].copy()
+        if not collected.empty:
+            collected["net_amount"] = _net_charge_amount(collected)
+            return collected["net_amount"].sum()
+    return orders_df["total"].sum() if not orders_df.empty else 0.0
 
 
 def _refund_charge_amount(df: pd.DataFrame) -> pd.Series:

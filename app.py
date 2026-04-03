@@ -5,12 +5,12 @@ import logging
 import plotly.express as px
 import streamlit as st
 
-from analytics import monthly_revenue_summary
+from analytics import monthly_revenue_summary, total_net_revenue
 from auth import is_admin, require_auth
 from pii_access import check_pii_access
 from export import cleanup_old_exports
-from methodology import API_DATA_DICTIONARY, DASHBOARD_METHODOLOGY
-from shared import get_cache, render_sync_sidebar
+from methodology import DASHBOARD_METHODOLOGY
+from shared import get_cache, load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
 from version import LAST_UPDATED, VERSION
 
 logger = logging.getLogger(__name__)
@@ -47,22 +47,9 @@ if st.sidebar.button("Clean Up Old Exports", use_container_width=True):
 
 st.title("Dashboard")
 
-# Load data with caching
-@st.cache_data(ttl=300)
-def load_orders():
-    return get_cache().get_orders_df()
-
-@st.cache_data(ttl=300)
-def load_subscriptions():
-    return get_cache().get_subscriptions_df()
-
 @st.cache_data(ttl=300)
 def load_customers():
     return get_cache().get_customers_df()
-
-@st.cache_data(ttl=300)
-def load_charges():
-    return get_cache().get_charges_df()
 
 
 orders_df = load_orders()
@@ -77,13 +64,7 @@ if orders_df.empty and subs_df.empty:
 # Metric cards
 col1, col2, col3, col4 = st.columns(4)
 
-if not charges_df.empty:
-    from analytics import _is_collected_charge, _net_charge_amount
-    _collected = charges_df[_is_collected_charge(charges_df["status"])].copy()
-    _collected["net_amount"] = _net_charge_amount(_collected)
-    total_revenue = _collected["net_amount"].sum()
-else:
-    total_revenue = orders_df["total"].sum() if not orders_df.empty else 0
+total_revenue = total_net_revenue(charges_df, orders_df)
 total_customers = customers_df["id"].nunique() if not customers_df.empty else 0
 active_subs = (
     subs_df[subs_df["status"].str.lower() == "active"]["id"].nunique()
@@ -138,9 +119,4 @@ if not orders_df.empty:
 # Documentation tabs
 # ------------------------------------------------------------------
 
-st.markdown("---")
-doc_tab1, doc_tab2 = st.tabs(["How It's Calculated", "Available Data Points"])
-with doc_tab1:
-    st.markdown(DASHBOARD_METHODOLOGY)
-with doc_tab2:
-    st.markdown(API_DATA_DICTIONARY)
+render_doc_tabs(DASHBOARD_METHODOLOGY)

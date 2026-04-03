@@ -6,8 +6,8 @@ import streamlit as st
 from analytics import refund_analysis
 from auth import require_auth
 from export import render_export_buttons
-from methodology import API_DATA_DICTIONARY, REFUND_ANALYSIS_METHODOLOGY
-from shared import get_cache, render_sync_sidebar
+from methodology import REFUND_ANALYSIS_METHODOLOGY
+from shared import load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(page_title="Refund Analysis", page_icon=":money_with_wings:", layout="wide")
 
@@ -15,26 +15,6 @@ require_auth()
 render_sync_sidebar()
 
 st.title("Refund Analysis")
-
-# ------------------------------------------------------------------
-# Cached data loaders
-# ------------------------------------------------------------------
-
-
-@st.cache_data(ttl=300)
-def load_charges():
-    return get_cache().get_charges_df()
-
-
-@st.cache_data(ttl=300)
-def load_orders():
-    return get_cache().get_orders_df()
-
-
-@st.cache_data(ttl=300)
-def load_subscriptions():
-    return get_cache().get_subscriptions_df()
-
 
 charges_df = load_charges()
 orders_df = load_orders()
@@ -145,9 +125,4 @@ else:
 # Documentation
 # ------------------------------------------------------------------
 
-st.markdown("---")
-doc_tab1, doc_tab2 = st.tabs(["How It's Calculated", "Available Data Points"])
-with doc_tab1:
-    st.markdown(REFUND_ANALYSIS_METHODOLOGY)
-with doc_tab2:
-    st.markdown(API_DATA_DICTIONARY)
+render_doc_tabs(REFUND_ANALYSIS_METHODOLOGY)
