@@ -263,8 +263,20 @@ The dashboard syncs data from the [SamCart v1 REST API](https://api.samcart.com/
 | `created_at` | Yes | `created_at` | Charge date (UTC) |
 | `processor` | No | — | Payment processor used |
 | `processor_transaction_id` | No | — | Gateway transaction ID |
-| `refund_amount` | Yes | `refund_amount` | Amount refunded in dollars (API value / 100) |
-| `refund_date` | Yes | `refund_date` | Date of refund (UTC) |
+| `refund_amount` | Yes | `refund_amount` | Amount refunded in dollars — sourced from `/refunds` endpoint, aggregated per charge |
+| `refund_date` | Yes | `refund_date` | Date of refund (UTC) — sourced from `/refunds` endpoint (latest refund date per charge) |
+
+---
+
+#### Refunds (`/v1/refunds`)
+
+| Field | Usage | Description |
+|-------|-------|-------------|
+| `charge_id` | Lookup key | Links refund to its parent charge |
+| `refund_amount` / `amount` | Aggregated | Summed per charge and stored as `charges.refund_amount` |
+| `created_at` | Aggregated | Latest refund date per charge stored as `charges.refund_date` |
+
+*No separate table — refund data is aggregated onto the `charges` table during sync.*
 
 ---
 

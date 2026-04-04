@@ -170,3 +170,10 @@ class SamCartClient:
         if since:
             params["created_at_min"] = since
         return self._paginate("charges", params)
+
+    def get_refunds(self, since: str | None = None) -> list[dict]:
+        """Fetch refunds, optionally filtering by created_at >= since."""
+        params = {}
+        if since:
+            params["created_at_min"] = since
+        return self._paginate("refunds", params)
