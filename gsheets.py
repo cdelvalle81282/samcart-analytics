@@ -16,7 +16,7 @@ SCOPES = [
 SHEET_NAME = "Daily Summary"
 
 
-def get_gsheets_client() -> gspread.Client:
+def _get_gsheets_client() -> gspread.Client:
     """Authenticate via service account from st.secrets["gsheets"]."""
     gsheets_config = st.secrets["gsheets"]
     sa_info = gsheets_config["service_account_info"]
@@ -37,7 +37,7 @@ def upload_daily_summary(summary_df: pd.DataFrame, spreadsheet_id: str) -> None:
     if summary_df.empty:
         return
 
-    client = get_gsheets_client()
+    client = _get_gsheets_client()
     spreadsheet = client.open_by_key(spreadsheet_id)
 
     # Get or create worksheet

@@ -160,6 +160,14 @@ class SamCartCache:
         ).fetchone()
         return row[0] if row else None
 
+    def _incremental_since(self, table_name: str) -> str | None:
+        """Calculate the since timestamp with 1-hour overlap for incremental sync."""
+        last_sync = self.get_last_sync(table_name)
+        if last_sync:
+            dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
+            return (dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return None
+
     def _update_sync_meta(self, table_name: str, commit: bool = True):
         """Update sync_meta with current time and record count."""
         _validate_table(table_name)
@@ -474,12 +482,7 @@ class SamCartCache:
         ))
 
         # Customers FIRST — needed to map customer_id -> email for other tables
-        since = None
-        if not force_full:
-            last_sync = self.get_last_sync("customers")
-            if last_sync:
-                dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
-                since = (dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        since = None if force_full else self._incremental_since("customers")
         _timed_sync("customers", 0.15, lambda: self._sync_table(
             "customers", client.get_customers, self._upsert_customers,
             since=since, force_full=force_full, headless=headless,
@@ -512,12 +515,7 @@ class SamCartCache:
             print(f"  refunds: {len(refund_list)} records in {elapsed:.1f}s")
 
         # Orders: incremental with 1-hour overlap
-        since = None
-        if not force_full:
-            last_sync = self.get_last_sync("orders")
-            if last_sync:
-                dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
-                since = (dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        since = None if force_full else self._incremental_since("orders")
         _timed_sync("orders", 0.8, lambda: self._sync_table(
             "orders", client.get_orders, self._upsert_orders,
             since=since, force_full=force_full, customer_map=customer_map,

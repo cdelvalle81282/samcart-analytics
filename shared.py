@@ -60,13 +60,9 @@ def render_sync_sidebar() -> None:
         st.session_state.sync_running = True
         try:
             with st.sidebar:
-                valid = client.verify_credentials()
-                if not valid:
-                    st.error("Invalid API key — cannot sync")
-                else:
-                    total = cache.sync_all(client, force_full=force_full)
-                    st.success(f"Synced {total:,} records")
-                    st.cache_data.clear()
+                total = cache.sync_all(client, force_full=force_full)
+                st.success(f"Synced {total:,} records")
+                st.cache_data.clear()
         except SamCartAPIError:
             logger.exception("SamCart API error during sync")
             st.sidebar.error("Sync failed due to an API error.")
