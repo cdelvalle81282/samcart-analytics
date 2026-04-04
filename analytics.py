@@ -1,5 +1,6 @@
 """Pure pandas analytics functions — no DB or API imports."""
 
+import itertools
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -60,6 +61,54 @@ def _net_charge_amount(df: pd.DataFrame) -> pd.Series:
     return net.clip(lower=0)
 
 
+def _has_valid_subscription_id(series: pd.Series) -> pd.Series:
+    """Return boolean mask for rows with a valid (non-empty, non-NaN) subscription_id."""
+    cleaned = series.fillna("").astype(str).str.strip()
+    return (cleaned != "") & (cleaned != "nan") & (cleaned != "None")
+
+
+def _join_subscription_interval(df: pd.DataFrame, subscriptions_df: pd.DataFrame) -> pd.DataFrame:
+    """Join subscription interval onto a charges DataFrame."""
+    if (
+        not subscriptions_df.empty
+        and "id" in subscriptions_df.columns
+        and "interval" in subscriptions_df.columns
+    ):
+        interval_map = (
+            subscriptions_df[["id", "interval"]]
+            .drop_duplicates("id", keep="last")
+            .rename(columns={"id": "subscription_id"})
+        )
+        interval_map["subscription_id"] = interval_map["subscription_id"].astype(str)
+        df["subscription_id"] = df["subscription_id"].astype(str)
+        df = df.merge(interval_map, on="subscription_id", how="left", suffixes=("", "_sub"))
+        if "interval_sub" in df.columns:
+            df["interval"] = df["interval_sub"].fillna(df.get("interval", pd.NA))
+            df = df.drop(columns=["interval_sub"])
+    else:
+        if "interval" not in df.columns:
+            df["interval"] = pd.NA
+    return df
+
+
+def _customer_net_spend(charges_df: pd.DataFrame, orders_df: pd.DataFrame) -> pd.DataFrame:
+    """Calculate per-customer net spend. Returns DataFrame with [customer_email, total_spend]."""
+    if not charges_df.empty:
+        valid = charges_df[_is_collected_charge(charges_df["status"])].copy()
+        if not valid.empty:
+            valid["net_amount"] = _net_charge_amount(valid)
+            return (
+                valid.groupby("customer_email")["net_amount"]
+                .sum().reset_index()
+                .rename(columns={"net_amount": "total_spend"})
+            )
+    return (
+        orders_df.groupby("customer_email")["total"]
+        .sum().reset_index()
+        .rename(columns={"total": "total_spend"})
+    )
+
+
 def total_net_revenue(charges_df: pd.DataFrame, orders_df: pd.DataFrame) -> float:
     """Calculate total net realized revenue from charges, falling back to orders."""
     if not charges_df.empty:
@@ -114,28 +163,7 @@ def calculate_customer_ltv(
         )
 
     # Total spend from collected charges (net of partial refunds)
-    if not charges_df.empty:
-        valid_charges = charges_df[
-            _is_collected_charge(charges_df["status"])
-        ].copy()
-        if not valid_charges.empty:
-            valid_charges["net_amount"] = _net_charge_amount(valid_charges)
-            spend = (
-                valid_charges.groupby("customer_email")["net_amount"]
-                .sum()
-                .reset_index()
-                .rename(columns={"net_amount": "total_spend"})
-            )
-        else:
-            spend = pd.DataFrame(columns=["customer_email", "total_spend"])
-    else:
-        # Fallback to orders if no charges table data
-        spend = (
-            orders_df.groupby("customer_email")["total"]
-            .sum()
-            .reset_index()
-            .rename(columns={"total": "total_spend"})
-        )
+    spend = _customer_net_spend(charges_df, orders_df)
 
     # First purchase date and order count from orders
     if not orders_df.empty:
@@ -223,9 +251,7 @@ def build_cohort_performance(
 
     # --- 1. Filter to subscription-linked charges only ---
     df = charges_df.copy()
-    df = df[df["subscription_id"].notna()]
-    df["subscription_id"] = df["subscription_id"].astype(str).str.strip()
-    df = df[df["subscription_id"].ne("") & df["subscription_id"].ne("nan")]
+    df = df[_has_valid_subscription_id(df["subscription_id"])]
     if df.empty:
         return empty_activity, empty_renewal, empty_stick
 
@@ -233,26 +259,7 @@ def build_cohort_performance(
     df = enrich_charges_with_product(df, orders_df, subscriptions_df)
 
     # --- 3. Join interval from subscriptions table ---
-    if (
-        not subscriptions_df.empty
-        and "id" in subscriptions_df.columns
-        and "interval" in subscriptions_df.columns
-    ):
-        interval_map = (
-            subscriptions_df[["id", "interval"]]
-            .drop_duplicates("id", keep="last")
-            .rename(columns={"id": "subscription_id"})
-        )
-        interval_map["subscription_id"] = interval_map["subscription_id"].astype(str)
-        df["subscription_id"] = df["subscription_id"].astype(str)
-        df = df.merge(interval_map, on="subscription_id", how="left", suffixes=("", "_sub"))
-        # If interval came from subscriptions, prefer it
-        if "interval_sub" in df.columns:
-            df["interval"] = df["interval_sub"].fillna(df.get("interval", pd.NA))
-            df = df.drop(columns=["interval_sub"])
-    else:
-        if "interval" not in df.columns:
-            df["interval"] = pd.NA
+    df = _join_subscription_interval(df, subscriptions_df)
 
     # --- 4. Apply product/interval filters ---
     if product_filter:
@@ -399,9 +406,7 @@ def build_cohort_heatmap(
 
     # --- 1. Filter to subscription-linked charges ---
     df = charges_df.copy()
-    df = df[df["subscription_id"].notna()]
-    df["subscription_id"] = df["subscription_id"].astype(str).str.strip()
-    df = df[df["subscription_id"].ne("") & df["subscription_id"].ne("nan")]
+    df = df[_has_valid_subscription_id(df["subscription_id"])]
     if df.empty:
         return pd.DataFrame()
 
@@ -409,25 +414,7 @@ def build_cohort_heatmap(
     df = enrich_charges_with_product(df, orders_df, subscriptions_df)
 
     # --- 3. Join interval from subscriptions table ---
-    if (
-        not subscriptions_df.empty
-        and "id" in subscriptions_df.columns
-        and "interval" in subscriptions_df.columns
-    ):
-        interval_map = (
-            subscriptions_df[["id", "interval"]]
-            .drop_duplicates("id", keep="last")
-            .rename(columns={"id": "subscription_id"})
-        )
-        interval_map["subscription_id"] = interval_map["subscription_id"].astype(str)
-        df["subscription_id"] = df["subscription_id"].astype(str)
-        df = df.merge(interval_map, on="subscription_id", how="left", suffixes=("", "_sub"))
-        if "interval_sub" in df.columns:
-            df["interval"] = df["interval_sub"].fillna(df.get("interval", pd.NA))
-            df = df.drop(columns=["interval_sub"])
-    else:
-        if "interval" not in df.columns:
-            df["interval"] = pd.NA
+    df = _join_subscription_interval(df, subscriptions_df)
 
     # --- 4. Apply product/interval filters ---
     if product_filter:
@@ -728,7 +715,7 @@ def _identify_renewals(
     if "subscription_id" not in charges_df.columns:
         return result
 
-    has_sub = charges_df["subscription_id"].notna() & (charges_df["subscription_id"] != "") & (charges_df["subscription_id"] != "nan")
+    has_sub = _has_valid_subscription_id(charges_df["subscription_id"])
 
     if has_sub.any():
         sub_charges = charges_df.loc[has_sub].copy()
@@ -912,7 +899,7 @@ def daily_renewals(
     if "subscription_id" not in df.columns:
         return pd.DataFrame(columns=cols)
 
-    df = df[df["subscription_id"].notna() & (df["subscription_id"] != "") & (df["subscription_id"] != "nan")]
+    df = df[_has_valid_subscription_id(df["subscription_id"])]
     if df.empty:
         return pd.DataFrame(columns=cols)
 
@@ -1026,25 +1013,7 @@ def new_customer_ltv_by_entry_product(
     })
 
     # Total spend per customer from collected charges (net of partial refunds)
-    if not charges_df.empty:
-        valid = charges_df[_is_collected_charge(charges_df["status"])].copy()
-        if not valid.empty:
-            valid["net_amount"] = _net_charge_amount(valid)
-            spend = (
-                valid.groupby("customer_email")["net_amount"]
-                .sum()
-                .reset_index()
-                .rename(columns={"net_amount": "total_spend"})
-            )
-        else:
-            spend = pd.DataFrame(columns=["customer_email", "total_spend"])
-    else:
-        spend = (
-            odf.groupby("customer_email")["total"]
-            .sum()
-            .reset_index()
-            .rename(columns={"total": "total_spend"})
-        )
+    spend = _customer_net_spend(charges_df, odf)
 
     merged = first_orders.merge(spend, on="customer_email", how="left")
     merged["total_spend"] = merged["total_spend"].fillna(0.0)
@@ -1699,8 +1668,6 @@ def multi_product_buyers(
 
     Returns (buyer_summary, product_combos).
     """
-    import itertools
-
     empty_buyers = pd.DataFrame(columns=["customer_email", "product_count", "products"])
     empty_combos = pd.DataFrame(columns=["product_a", "product_b", "pair_count"])
 
