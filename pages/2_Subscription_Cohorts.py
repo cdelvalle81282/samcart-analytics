@@ -5,7 +5,7 @@ import plotly.express as px
 import streamlit as st
 
 from analytics import build_cohort_heatmap, build_cohort_performance
-from auth import require_auth
+from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import COHORT_RETENTION_METHODOLOGY
 from shared import load_charges, load_orders, load_products, load_subscriptions, render_doc_tabs, render_sync_sidebar
@@ -17,6 +17,7 @@ st.set_page_config(
 )
 
 require_auth()
+require_permission("page:cohorts")
 render_sync_sidebar()
 
 st.title("Cohort Performance Report")

@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from analytics import mrr_waterfall, revenue_forecast
-from auth import require_auth
+from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import (
     MRR_WATERFALL_METHODOLOGY,
@@ -16,6 +16,7 @@ from shared import load_subscriptions, render_doc_tabs, render_sync_sidebar
 st.set_page_config(page_title="Revenue Forecasting", page_icon=":crystal_ball:", layout="wide")
 
 require_auth()
+require_permission("page:revenue_forecast")
 render_sync_sidebar()
 
 st.title("Revenue Forecasting")

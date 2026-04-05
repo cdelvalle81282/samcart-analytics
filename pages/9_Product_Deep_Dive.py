@@ -8,7 +8,7 @@ from analytics import (
     product_attach_rate,
     product_mrr_trend,
 )
-from auth import require_auth
+from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import (
     ATTACH_RATE_METHODOLOGY,
@@ -20,6 +20,7 @@ from shared import load_charges, load_orders, load_subscriptions, render_doc_tab
 st.set_page_config(page_title="Product Deep Dive", page_icon=":package:", layout="wide")
 
 require_auth()
+require_permission("page:product_deep_dive")
 render_sync_sidebar()
 
 st.title("Product Deep Dive")

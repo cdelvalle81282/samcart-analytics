@@ -4,7 +4,7 @@ import plotly.express as px
 import streamlit as st
 
 from analytics import customer_concentration, multi_product_buyers, rfm_segmentation
-from auth import require_auth
+from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import (
     CONCENTRATION_METHODOLOGY,
@@ -16,6 +16,7 @@ from shared import load_charges, load_orders, render_doc_tabs, render_sync_sideb
 st.set_page_config(page_title="Customer Segments", page_icon=":busts_in_silhouette:", layout="wide")
 
 require_auth()
+require_permission("page:customer_segments")
 render_sync_sidebar()
 
 st.title("Customer Segments")

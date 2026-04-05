@@ -4,7 +4,7 @@ import plotly.express as px
 import streamlit as st
 
 from analytics import refund_analysis
-from auth import require_auth
+from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import REFUND_ANALYSIS_METHODOLOGY
 from shared import load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
@@ -12,6 +12,7 @@ from shared import load_charges, load_orders, load_subscriptions, render_doc_tab
 st.set_page_config(page_title="Refund Analysis", page_icon=":money_with_wings:", layout="wide")
 
 require_auth()
+require_permission("page:refund_analysis")
 render_sync_sidebar()
 
 st.title("Refund Analysis")

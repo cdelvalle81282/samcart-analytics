@@ -45,32 +45,35 @@ def render_sync_sidebar() -> None:
             logger.exception("API key verification failed")
             st.sidebar.warning("Could not verify API key.")
 
-    # Sync controls
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Data Sync")
+    # Sync controls (gated by feature:sync_data permission)
+    from auth import has_permission
 
-    force_full = st.sidebar.checkbox("Force full resync", value=False)
-    sync_btn = st.sidebar.button(
-        "Sync Data",
-        disabled=st.session_state.get("sync_running", False),
-        use_container_width=True,
-    )
+    if has_permission("feature:sync_data"):
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Data Sync")
 
-    if sync_btn:
-        st.session_state.sync_running = True
-        try:
-            with st.sidebar:
-                total = cache.sync_all(client, force_full=force_full)
-                st.success(f"Synced {total:,} records")
-                st.cache_data.clear()
-        except SamCartAPIError:
-            logger.exception("SamCart API error during sync")
-            st.sidebar.error("Sync failed due to an API error.")
-        except Exception:
-            logger.exception("Unexpected error during sync")
-            st.sidebar.error("Sync failed unexpectedly.")
-        finally:
-            st.session_state.sync_running = False
+        force_full = st.sidebar.checkbox("Force full resync", value=False)
+        sync_btn = st.sidebar.button(
+            "Sync Data",
+            disabled=st.session_state.get("sync_running", False),
+            use_container_width=True,
+        )
+
+        if sync_btn:
+            st.session_state.sync_running = True
+            try:
+                with st.sidebar:
+                    total = cache.sync_all(client, force_full=force_full)
+                    st.success(f"Synced {total:,} records")
+                    st.cache_data.clear()
+            except SamCartAPIError:
+                logger.exception("SamCart API error during sync")
+                st.sidebar.error("Sync failed due to an API error.")
+            except Exception:
+                logger.exception("Unexpected error during sync")
+                st.sidebar.error("Sync failed unexpectedly.")
+            finally:
+                st.session_state.sync_running = False
 
     # Sync summary
     summary = cache.get_sync_summary()

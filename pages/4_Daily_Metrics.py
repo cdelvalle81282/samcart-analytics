@@ -12,7 +12,7 @@ from analytics import (
     build_daily_summary,
     new_customer_ltv_by_entry_product,
 )
-from auth import require_auth
+from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import DAILY_METRICS_METHODOLOGY
 from shared import load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 st.set_page_config(page_title="Daily Metrics", page_icon=":chart_with_upwards_trend:", layout="wide")
 
 require_auth()
+require_permission("page:daily_metrics")
 render_sync_sidebar()
 
 st.title("Daily Metrics")

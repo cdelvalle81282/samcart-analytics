@@ -76,7 +76,9 @@ def cleanup_old_exports(max_age_days: int = 7) -> int:
 
 def render_export_buttons(df: pd.DataFrame, filename_base: str, key_prefix: str = ""):
     """Render download buttons for Excel and CSV with optional PII toggle."""
-    if df.empty:
+    from auth import has_permission
+
+    if df.empty or not has_permission("feature:export"):
         return
 
     # Defense-in-depth: strip anything that looks like PII from filename

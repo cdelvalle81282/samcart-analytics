@@ -5,7 +5,7 @@ import logging
 import streamlit as st
 
 from analytics import calculate_customer_ltv
-from auth import is_admin, require_auth
+from auth import is_admin, require_auth, require_permission
 from email_sender import get_admin_email, send_approval_email
 from export import render_export_buttons
 from methodology import CUSTOMER_LOOKUP_METHODOLOGY
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 st.set_page_config(page_title="Customer Lookup", page_icon=":bust_in_silhouette:", layout="wide")
 
 require_auth()
+require_permission("page:customer_lookup")
 render_sync_sidebar()
 
 st.title("Customer Lookup")

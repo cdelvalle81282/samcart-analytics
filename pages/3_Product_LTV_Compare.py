@@ -5,7 +5,7 @@ import plotly.express as px
 import streamlit as st
 
 from analytics import to_eastern, product_ltv_ranking
-from auth import require_auth
+from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import PRODUCT_LTV_METHODOLOGY
 from shared import load_orders, load_products, load_subscriptions, render_doc_tabs, render_sync_sidebar
@@ -13,6 +13,7 @@ from shared import load_orders, load_products, load_subscriptions, render_doc_ta
 st.set_page_config(page_title="Product LTV Compare", page_icon=":package:", layout="wide")
 
 require_auth()
+require_permission("page:product_ltv")
 render_sync_sidebar()
 
 st.title("Product LTV Comparison")

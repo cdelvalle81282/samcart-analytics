@@ -2,13 +2,13 @@
 
 import streamlit as st
 
-from auth import require_admin, require_auth
+from auth import require_auth, require_permission
 from shared import get_cache, render_sync_sidebar
 
 st.set_page_config(page_title="Audit Log", page_icon=":lock:", layout="wide")
 
 require_auth()
-require_admin()
+require_permission("admin:audit_log")
 render_sync_sidebar()
 
 st.title("Audit Log")

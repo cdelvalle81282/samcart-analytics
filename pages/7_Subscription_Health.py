@@ -4,7 +4,7 @@ import plotly.express as px
 import streamlit as st
 
 from analytics import churn_analysis, subscription_aging, trial_conversion
-from auth import require_auth
+from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import (
     CHURN_ANALYSIS_METHODOLOGY,
@@ -16,6 +16,7 @@ from shared import load_subscriptions, render_doc_tabs, render_sync_sidebar
 st.set_page_config(page_title="Subscription Health", page_icon=":heartbeat:", layout="wide")
 
 require_auth()
+require_permission("page:subscription_health")
 render_sync_sidebar()
 
 st.title("Subscription Health")
