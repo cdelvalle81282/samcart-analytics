@@ -82,3 +82,43 @@ def upload_daily_summary(summary_df: pd.DataFrame, spreadsheet_id: str) -> None:
         [upload_df.columns.tolist()] + upload_df.values.tolist(),
         value_input_option="USER_ENTERED",
     )
+
+
+def upload_report(
+    df: pd.DataFrame, spreadsheet_id: str, worksheet_name: str,
+) -> str:
+    """Upload a DataFrame to a Google Sheet worksheet and return the sheet URL.
+
+    Creates the worksheet if it doesn't exist. Replaces all data.
+    Returns the spreadsheet URL for Slack linking.
+    """
+    if df.empty:
+        return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
+
+    client = _get_gsheets_client()
+    spreadsheet = client.open_by_key(spreadsheet_id)
+
+    try:
+        worksheet = spreadsheet.worksheet(worksheet_name)
+    except gspread.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(
+            title=worksheet_name,
+            rows=str(len(df) + 1),
+            cols=str(len(df.columns)),
+        )
+
+    # Convert timestamps/dates to strings for JSON serialization
+    upload_df = df.copy()
+    for col in upload_df.columns:
+        if pd.api.types.is_datetime64_any_dtype(upload_df[col]):
+            upload_df[col] = upload_df[col].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    upload_df = upload_df.fillna("")
+
+    worksheet.clear()
+    worksheet.update(
+        [upload_df.columns.tolist()] + upload_df.values.tolist(),
+        value_input_option="USER_ENTERED",
+    )
+
+    return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"

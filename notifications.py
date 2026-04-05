@@ -140,6 +140,23 @@ def send_email_notification(
     return send_report_email(destination, report_name, html_body)
 
 
+def send_slack_sheet_link(
+    webhook_url: str, report_name: str, sheet_url: str,
+) -> bool:
+    """Post a Google Sheets link to Slack via incoming webhook."""
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"Report: {report_name}"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"<{sheet_url}|Open in Google Sheets>"}},
+    ]
+    try:
+        resp = requests.post(webhook_url, json={"blocks": blocks}, timeout=10)
+        resp.raise_for_status()
+        return True
+    except Exception:
+        logger.exception("Failed to send Slack sheet link: %s", report_name)
+        return False
+
+
 def dispatch_notifications(
     summary_df: pd.DataFrame,
     managers: list[ManagerConfig],
