@@ -1933,3 +1933,114 @@ def new_vs_renewal_revenue_mix(
     ).fillna(0).round(2)
 
     return result.sort_values(["product_name", "month"]).reset_index(drop=True)
+
+
+# ------------------------------------------------------------------
+# Upcoming Renewals & Cancellations
+# ------------------------------------------------------------------
+
+
+def upcoming_renewals_and_cancellations(
+    subscriptions_df: pd.DataFrame,
+    lookahead_weeks: int = 1,
+    product_filter: list[str] | None = None,
+) -> dict[str, pd.DataFrame]:
+    """
+    Find subscriptions due for renewal or set to cancel within the lookahead window.
+
+    Returns dict with 'renewals' and 'cancellations' DataFrames.
+    """
+    if subscriptions_df.empty:
+        empty = pd.DataFrame()
+        return {"renewals": empty, "cancellations": empty}
+
+    subs = subscriptions_df.copy()
+    now = pd.Timestamp.now(tz="UTC")
+    cutoff = now + pd.Timedelta(weeks=lookahead_weeks)
+
+    if product_filter:
+        subs = subs[subs["product_name"].isin(product_filter)]
+
+    # --- Upcoming renewals: active subs with next_bill_date in window ---
+    renewals = pd.DataFrame()
+    if "next_bill_date" in subs.columns:
+        active = subs[subs["status"].str.lower() == "active"].copy()
+        active["next_bill_date"] = pd.to_datetime(
+            active["next_bill_date"], utc=True, errors="coerce"
+        )
+        active = active.dropna(subset=["next_bill_date"])
+        upcoming = active[
+            (active["next_bill_date"] >= now) & (active["next_bill_date"] <= cutoff)
+        ].copy()
+        if not upcoming.empty:
+            upcoming["days_until"] = (upcoming["next_bill_date"] - now).dt.days
+            renewals = upcoming[
+                ["customer_email", "product_name", "interval", "price",
+                 "next_bill_date", "days_until"]
+            ].sort_values("days_until")
+
+    # --- Upcoming cancellations: canceled subs with canceled_at in future window ---
+    cancellations = pd.DataFrame()
+    if "canceled_at" in subs.columns:
+        canceled = subs[
+            subs["status"].str.lower().isin(["canceled", "cancelled"])
+        ].copy()
+        canceled["canceled_at"] = pd.to_datetime(
+            canceled["canceled_at"], utc=True, errors="coerce"
+        )
+        canceled = canceled.dropna(subset=["canceled_at"])
+        upcoming_cancel = canceled[
+            (canceled["canceled_at"] >= now) & (canceled["canceled_at"] <= cutoff)
+        ].copy()
+        if not upcoming_cancel.empty:
+            upcoming_cancel["days_until"] = (
+                upcoming_cancel["canceled_at"] - now
+            ).dt.days
+            cancellations = upcoming_cancel[
+                ["customer_email", "product_name", "interval", "price",
+                 "canceled_at", "days_until"]
+            ].sort_values("days_until")
+
+    return {"renewals": renewals, "cancellations": cancellations}
+
+
+# ------------------------------------------------------------------
+# VIP Customers
+# ------------------------------------------------------------------
+
+
+def vip_customers(
+    charges_df: pd.DataFrame,
+    orders_df: pd.DataFrame,
+    subscriptions_df: pd.DataFrame,
+    ltv_threshold: float = 4000.0,
+    min_billing_cycles: int = 3,
+    product_filter: list[str] | None = None,
+) -> dict[str, pd.DataFrame]:
+    """
+    Identify VIP customers by high LTV or subscription loyalty.
+
+    Returns dict with:
+    - 'high_ltv': customers with net lifetime spend >= ltv_threshold
+    - 'loyal_subscribers': active subscribers with >= min_billing_cycles
+    """
+    # --- High LTV ---
+    spend = _customer_net_spend(charges_df, orders_df)
+    high_ltv = spend[spend["total_spend"] >= ltv_threshold].copy()
+    high_ltv = high_ltv.sort_values("total_spend", ascending=False)
+
+    # --- Loyal subscribers ---
+    loyal = pd.DataFrame()
+    if not subscriptions_df.empty:
+        subs = subscriptions_df.copy()
+        active = subs[subs["status"].str.lower() == "active"]
+        if product_filter:
+            active = active[active["product_name"].isin(product_filter)]
+        if "billing_cycle_count" in active.columns:
+            loyal = active[active["billing_cycle_count"] >= min_billing_cycles].copy()
+            loyal = loyal[
+                ["customer_email", "product_name", "interval", "price",
+                 "billing_cycle_count"]
+            ].sort_values("billing_cycle_count", ascending=False)
+
+    return {"high_ltv": high_ltv, "loyal_subscribers": loyal}
