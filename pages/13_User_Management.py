@@ -1,6 +1,8 @@
 """Admin page: User Management, Permissions, and Scheduled Reports."""
 
+import datetime
 import logging
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
@@ -10,6 +12,55 @@ from report_catalog import REPORT_CATALOG
 from shared import get_scheduler, render_sync_sidebar
 
 logger = logging.getLogger(__name__)
+
+COMMON_TIMEZONES = [
+    "America/Los_Angeles",
+    "America/Denver",
+    "America/Chicago",
+    "America/New_York",
+    "UTC",
+]
+
+DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def _format_schedule(report: dict) -> str:
+    """Format schedule for display in the report's timezone."""
+    tz_name = report.get("timezone", "America/Los_Angeles")
+    try:
+        tz = ZoneInfo(tz_name)
+    except KeyError:
+        tz = ZoneInfo("America/Los_Angeles")
+
+    utc_time = datetime.time(report["hour_utc"], 0)
+    utc_dt = datetime.datetime.combine(
+        datetime.date.today(), utc_time, tzinfo=ZoneInfo("UTC")
+    )
+    local_dt = utc_dt.astimezone(tz)
+    local_time = local_dt.strftime("%I:%M %p").lstrip("0")
+    tz_abbr = local_dt.strftime("%Z")
+
+    schedule_type = report.get("schedule_type", "weekly")
+    if schedule_type == "monthly":
+        dom = report.get("day_of_month", 1)
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(
+            dom if dom < 20 else dom % 10, "th"
+        )
+        if 11 <= dom <= 13:
+            suffix = "th"
+        return f"Monthly on the {dom}{suffix} at {local_time} {tz_abbr}"
+
+    schedule_days = report.get("schedule_days", "0,1,2,3,4,5,6")
+    if schedule_days:
+        day_indices = sorted(
+            int(d.strip()) for d in schedule_days.split(",") if d.strip()
+        )
+        day_names = [DAY_NAMES[d] for d in day_indices if d < 7]
+        if len(day_names) == 7:
+            return f"Every day at {local_time} {tz_abbr}"
+        return f"{', '.join(day_names)} at {local_time} {tz_abbr}"
+    return f"Every day at {local_time} {tz_abbr}"
+
 
 st.set_page_config(page_title="User Management", page_icon=":gear:", layout="wide")
 
@@ -111,6 +162,33 @@ with tab_users:
                             )
                             st.rerun()
 
+                # Slack User ID
+                slack_row = auth_db.conn.execute(
+                    "SELECT slack_user_id FROM users WHERE username = ?",
+                    (user["username"],),
+                ).fetchone()
+                current_slack_id = (
+                    (slack_row["slack_user_id"] or "") if slack_row else ""
+                )
+
+                new_slack_id = st.text_input(
+                    "Slack User ID",
+                    value=current_slack_id,
+                    key=f"slack_{user['username']}",
+                    help="Find in Slack: Profile > \u22ee > Copy member ID",
+                )
+                if new_slack_id != current_slack_id:
+                    if st.button(
+                        "Update Slack ID",
+                        key=f"slack_btn_{user['username']}",
+                    ):
+                        auth_db.update_user(
+                            user["username"],
+                            slack_user_id=new_slack_id or None,
+                        )
+                        st.success("Slack ID updated.")
+                        st.rerun()
+
     st.markdown("---")
     st.subheader("Add User")
 
@@ -210,25 +288,25 @@ with tab_reports:
     if reports:
         for report in reports:
             status = "Active" if report["is_active"] else "Inactive"
-            freq_label = report["frequency"].title()
+            schedule_label = _format_schedule(report)
             with st.expander(
-                f"{report['name']} — {freq_label} ({status})", expanded=False
+                f"{report['name']} — {schedule_label} ({status})",
+                expanded=False,
             ):
                 st.write(f"**Type:** {report['report_type']}")
-                st.write(f"**Frequency:** {freq_label}")
-                st.write(f"**Hour (UTC):** {report['hour_utc']}")
-                if report["day_of_week"] is not None:
-                    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-                    st.write(f"**Day of week:** {days[report['day_of_week']]}")
-                if report["day_of_month"] is not None:
-                    st.write(f"**Day of month:** {report['day_of_month']}")
-                st.write(f"**Product filter:** {report['product_filter'] or 'All'}")
-                st.write(f"**Date range:** {report['date_range_days']} days")
+                st.write(f"**Schedule:** {schedule_label}")
+                if report.get("product_filter"):
+                    st.write(f"**Product filter:** {report['product_filter']}")
+                st.write(
+                    f"**Date range:** {report.get('date_range_days', 30)} days"
+                )
                 st.write(f"**Created by:** {report['created_by']}")
 
                 col1, col2 = st.columns(2)
                 if report["is_active"]:
-                    if col1.button("Deactivate", key=f"rpt_deact_{report['id']}"):
+                    if col1.button(
+                        "Deactivate", key=f"rpt_deact_{report['id']}"
+                    ):
                         auth_db.deactivate_scheduled_report(report["id"])
                         try:
                             get_scheduler().remove_report(report["id"])
@@ -243,7 +321,9 @@ with tab_reports:
                             get_scheduler().run_now(report["id"])
                             st.success(f"Report sent: {report['name']}")
                         except Exception:
-                            logger.exception("Send Now failed for %s", report["name"])
+                            logger.exception(
+                                "Send Now failed for %s", report["name"]
+                            )
                             st.error("Failed to send report. Check logs.")
 
     st.markdown("---")
@@ -256,46 +336,72 @@ with tab_reports:
             list(REPORT_CATALOG.keys()),
             format_func=lambda k: REPORT_CATALOG[k]["name"],
         )
-        rpt_freq = st.selectbox("Frequency", ["daily", "weekly", "monthly"])
-        rpt_hour = st.number_input("Hour (UTC)", min_value=0, max_value=23, value=12)
 
-        col_a, col_b = st.columns(2)
-        rpt_dow = col_a.number_input(
-            "Day of week (0=Mon)", min_value=0, max_value=6, value=0,
-            help="Only used for weekly reports",
+        rpt_schedule_type = st.radio(
+            "Schedule", ["Weekly", "Monthly"], horizontal=True
         )
-        rpt_dom = col_b.number_input(
-            "Day of month", min_value=1, max_value=28, value=1,
-            help="Only used for monthly reports",
-        )
+
+        selected_days: list[int] = []
+        rpt_dom = 1
+        if rpt_schedule_type == "Weekly":
+            st.caption("Select which days to receive the report:")
+            day_cols = st.columns(7)
+            for i, (col, name) in enumerate(zip(day_cols, DAY_NAMES)):
+                if col.checkbox(name, value=i < 5, key=f"day_{i}"):
+                    selected_days.append(i)
+        else:
+            rpt_dom = st.number_input(
+                "Day of month", min_value=1, max_value=28, value=1
+            )
+
+        rpt_tz = st.selectbox("Timezone", COMMON_TIMEZONES, index=0)
+        rpt_time = st.time_input("Delivery time", value=datetime.time(7, 0))
+
         rpt_range = st.number_input("Date range (days)", min_value=1, value=30)
         rpt_product = st.text_input(
             "Product filter (comma-separated, blank=all)"
         )
         rpt_sheet = st.text_input("Google Spreadsheet ID")
-        rpt_webhook = st.text_input("Slack Webhook URL")
-        rpt_channel = st.text_input("Slack Channel (optional)")
 
         rpt_submitted = st.form_submit_button("Create Report")
 
         if rpt_submitted:
-            if not rpt_name or not rpt_sheet or not rpt_webhook:
-                st.error("Name, Spreadsheet ID, and Webhook URL are required.")
+            if not rpt_name or not rpt_sheet:
+                st.error("Name and Spreadsheet ID are required.")
+            elif rpt_schedule_type == "Weekly" and not selected_days:
+                st.error("Select at least one day.")
             else:
+                # Convert local time to UTC
+                local_tz = ZoneInfo(rpt_tz)
+                local_dt = datetime.datetime.combine(
+                    datetime.date.today(),
+                    rpt_time,
+                    tzinfo=local_tz,
+                )
+                utc_dt = local_dt.astimezone(ZoneInfo("UTC"))
+                hour_utc = utc_dt.hour
+
                 try:
                     report = auth_db.create_scheduled_report(
                         name=rpt_name,
                         report_type=rpt_type,
-                        frequency=rpt_freq,
-                        hour_utc=int(rpt_hour),
+                        schedule_type=rpt_schedule_type.lower(),
+                        schedule_days=(
+                            ",".join(str(d) for d in selected_days)
+                            if rpt_schedule_type == "Weekly"
+                            else None
+                        ),
+                        day_of_month=(
+                            int(rpt_dom)
+                            if rpt_schedule_type == "Monthly"
+                            else None
+                        ),
+                        hour_utc=hour_utc,
+                        timezone=rpt_tz,
                         spreadsheet_id=rpt_sheet,
-                        slack_webhook=rpt_webhook,
                         created_by=current_user,
-                        day_of_week=int(rpt_dow) if rpt_freq == "weekly" else None,
-                        day_of_month=int(rpt_dom) if rpt_freq == "monthly" else None,
                         product_filter=rpt_product or None,
                         date_range_days=int(rpt_range),
-                        slack_channel=rpt_channel or None,
                     )
                     try:
                         get_scheduler().reload_report(report["id"])
