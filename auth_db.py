@@ -56,6 +56,8 @@ ROLE_DEFAULTS = {
 
 ALL_PERMISSIONS = sorted({p for perms in ROLE_DEFAULTS.values() for p in perms})
 
+_UNSET = object()
+
 
 # ── AuthDB class ─────────────────────────────────────────────────────────────
 
@@ -123,6 +125,11 @@ class AuthDB:
             );
         """
         )
+        # ── Migrations ───────────────────────────────────────────────────
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN slack_user_id TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         self.conn.commit()
 
     # ── Helpers ───────────────────────────────────────────────────────────
@@ -143,6 +150,7 @@ class AuthDB:
             "is_active": bool(row["is_active"]),
             "created_by": row["created_by"],
             "created_at": row["created_at"],
+            "slack_user_id": row["slack_user_id"] if "slack_user_id" in row.keys() else None,
         }
 
     def _get_user_id(self, username: str) -> int:
@@ -187,8 +195,8 @@ class AuthDB:
     def get_user(self, username: str) -> dict | None:
         """Return user dict (no password_hash) or None."""
         row = self.conn.execute(
-            "SELECT id, username, email, role, is_active, created_by, created_at "
-            "FROM users WHERE username = ?",
+            "SELECT id, username, email, role, is_active, created_by, created_at, "
+            "slack_user_id FROM users WHERE username = ?",
             (username,),
         ).fetchone()
         if row is None:
@@ -198,8 +206,8 @@ class AuthDB:
     def list_users(self) -> list[dict]:
         """Return all users (no password hashes)."""
         rows = self.conn.execute(
-            "SELECT id, username, email, role, is_active, created_by, created_at "
-            "FROM users ORDER BY id"
+            "SELECT id, username, email, role, is_active, created_by, created_at, "
+            "slack_user_id FROM users ORDER BY id"
         ).fetchall()
         return [self._row_to_user_dict(r) for r in rows]
 
@@ -208,6 +216,7 @@ class AuthDB:
         username: str,
         email: str | None = None,
         role: str | None = None,
+        slack_user_id=_UNSET,
     ) -> None:
         """Update user fields. If role changes, reset permissions to new role defaults."""
         user = self.get_user(username)
@@ -229,6 +238,12 @@ class AuthDB:
             )
             # Reset permissions to new role defaults
             self.reset_permissions_to_defaults(username)
+
+        if slack_user_id is not _UNSET:
+            self.conn.execute(
+                "UPDATE users SET slack_user_id = ? WHERE username = ?",
+                (slack_user_id, username),
+            )
 
         self.conn.commit()
 

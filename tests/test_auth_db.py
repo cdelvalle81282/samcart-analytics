@@ -114,6 +114,24 @@ class TestUserCRUD:
         with pytest.raises(ValueError, match="Invalid role"):
             db.create_user("alice", "a@x.com", "pw", "root")
 
+    def test_slack_user_id_default_none(self, db):
+        db.create_user("alice", "a@x.com", "pw", "viewer")
+        user = db.get_user("alice")
+        assert user["slack_user_id"] is None
+
+    def test_update_slack_user_id(self, db):
+        db.create_user("alice", "a@x.com", "pw", "viewer")
+        db.update_user("alice", slack_user_id="U12345ABC")
+        user = db.get_user("alice")
+        assert user["slack_user_id"] == "U12345ABC"
+
+    def test_update_slack_user_id_to_none(self, db):
+        db.create_user("alice", "a@x.com", "pw", "viewer")
+        db.update_user("alice", slack_user_id="U12345ABC")
+        assert db.get_user("alice")["slack_user_id"] == "U12345ABC"
+        db.update_user("alice", slack_user_id=None)
+        assert db.get_user("alice")["slack_user_id"] is None
+
 
 # ── Authentication ───────────────────────────────────────────────────────────
 
