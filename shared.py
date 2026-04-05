@@ -122,7 +122,9 @@ def get_auth_db():
 def get_scheduler():
     """Start and return the shared ReportScheduler."""
     from report_scheduler import ReportScheduler
-    scheduler = ReportScheduler(get_auth_db(), get_cache())
+    slack_cfg = st.secrets.get("slack", {})
+    bot_token = slack_cfg.get("bot_token", "")
+    scheduler = ReportScheduler(get_auth_db(), get_cache(), slack_bot_token=bot_token)
     scheduler.start()
     return scheduler
 
