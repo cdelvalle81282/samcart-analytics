@@ -157,6 +157,41 @@ def send_slack_sheet_link(
         return False
 
 
+def send_slack_dm(
+    bot_token: str,
+    user_id: str,
+    report_name: str,
+    sheet_url: str,
+) -> bool:
+    """Send a report DM to a Slack user via chat.postMessage."""
+    if not bot_token or not user_id:
+        logger.error("Slack bot_token or user_id missing")
+        return False
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"Report: {report_name}"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"<{sheet_url}|Open in Google Sheets>"}},
+    ]
+
+    try:
+        resp = requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {bot_token}"},
+            json={"channel": user_id, "blocks": blocks, "text": f"Report: {report_name}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("ok"):
+            logger.error("Slack API error: %s", data.get("error", "unknown"))
+            return False
+        logger.info("Slack DM sent to %s: %s", user_id, report_name)
+        return True
+    except Exception:
+        logger.exception("Failed to send Slack DM to %s: %s", user_id, report_name)
+        return False
+
+
 def dispatch_notifications(
     summary_df: pd.DataFrame,
     managers: list[ManagerConfig],
