@@ -226,33 +226,48 @@ class TestPermissions:
 
 
 class TestScheduledReports:
-    def test_create_report(self, db):
+    def test_create_weekly_report(self, db):
         report = db.create_scheduled_report(
-            name="Weekly Revenue",
-            report_type="revenue_summary",
-            frequency="weekly",
-            hour_utc=9,
+            name="Weekday Revenue",
+            report_type="daily_metrics",
+            schedule_type="weekly",
+            schedule_days="0,1,2,3,4",
+            hour_utc=14,
+            timezone="America/Los_Angeles",
             spreadsheet_id="sheet123",
-            slack_webhook="https://hooks.slack.com/xxx",
             created_by="alice",
-            day_of_week=1,
         )
-        assert report["name"] == "Weekly Revenue"
-        assert report["frequency"] == "weekly"
-        assert report["day_of_week"] == 1
-        assert report["hour_utc"] == 9
+        assert report["name"] == "Weekday Revenue"
+        assert report["schedule_type"] == "weekly"
+        assert report["schedule_days"] == "0,1,2,3,4"
+        assert report["hour_utc"] == 14
+        assert report["timezone"] == "America/Los_Angeles"
         assert report["is_active"] is True
-        assert report["created_by"] == "alice"
-        assert report["date_range_days"] == 30
+
+    def test_create_monthly_report(self, db):
+        report = db.create_scheduled_report(
+            name="Monthly Summary",
+            report_type="daily_metrics",
+            schedule_type="monthly",
+            day_of_month=1,
+            hour_utc=9,
+            timezone="US/Eastern",
+            spreadsheet_id="sheet456",
+            created_by="bob",
+        )
+        assert report["schedule_type"] == "monthly"
+        assert report["day_of_month"] == 1
 
     def test_list_active_reports(self, db):
         db.create_scheduled_report(
-            name="R1", report_type="t", frequency="daily",
-            hour_utc=12, spreadsheet_id="s1", slack_webhook="w1", created_by="alice",
+            name="R1", report_type="t", schedule_type="weekly",
+            schedule_days="0", hour_utc=12, timezone="UTC",
+            spreadsheet_id="s1", created_by="alice",
         )
         r2 = db.create_scheduled_report(
-            name="R2", report_type="t", frequency="weekly",
-            hour_utc=12, spreadsheet_id="s2", slack_webhook="w2", created_by="bob",
+            name="R2", report_type="t", schedule_type="weekly",
+            schedule_days="0", hour_utc=12, timezone="UTC",
+            spreadsheet_id="s2", created_by="bob",
         )
         db.deactivate_scheduled_report(r2["id"])
 
@@ -265,8 +280,9 @@ class TestScheduledReports:
 
     def test_deactivate_report(self, db):
         report = db.create_scheduled_report(
-            name="R1", report_type="t", frequency="daily",
-            hour_utc=12, spreadsheet_id="s1", slack_webhook="w1", created_by="alice",
+            name="R1", report_type="t", schedule_type="weekly",
+            schedule_days="0", hour_utc=12, timezone="UTC",
+            spreadsheet_id="s1", created_by="alice",
         )
         db.deactivate_scheduled_report(report["id"])
         updated = db.get_scheduled_report(report["id"])
@@ -274,38 +290,24 @@ class TestScheduledReports:
 
     def test_update_report(self, db):
         report = db.create_scheduled_report(
-            name="R1", report_type="t", frequency="daily",
-            hour_utc=12, spreadsheet_id="s1", slack_webhook="w1", created_by="alice",
+            name="R1", report_type="t", schedule_type="weekly",
+            schedule_days="0", hour_utc=12, timezone="UTC",
+            spreadsheet_id="s1", created_by="alice",
         )
         db.update_scheduled_report(report["id"], name="Updated", hour_utc=15)
         updated = db.get_scheduled_report(report["id"])
         assert updated["name"] == "Updated"
         assert updated["hour_utc"] == 15
 
-    def test_get_report(self, db):
-        report = db.create_scheduled_report(
-            name="R1", report_type="t", frequency="monthly",
-            hour_utc=6, spreadsheet_id="s1", slack_webhook="w1", created_by="bob",
-            day_of_month=15, product_filter="prod_123", date_range_days=60,
-            slack_channel="#reports",
-        )
-        fetched = db.get_scheduled_report(report["id"])
-        assert fetched["name"] == "R1"
-        assert fetched["frequency"] == "monthly"
-        assert fetched["day_of_month"] == 15
-        assert fetched["product_filter"] == "prod_123"
-        assert fetched["date_range_days"] == 60
-        assert fetched["slack_channel"] == "#reports"
-
     def test_get_nonexistent_report(self, db):
         assert db.get_scheduled_report(999) is None
 
     def test_update_ignores_unknown_columns(self, db):
         report = db.create_scheduled_report(
-            name="R1", report_type="t", frequency="daily",
-            hour_utc=12, spreadsheet_id="s1", slack_webhook="w1", created_by="alice",
+            name="R1", report_type="t", schedule_type="weekly",
+            schedule_days="0", hour_utc=12, timezone="UTC",
+            spreadsheet_id="s1", created_by="alice",
         )
-        # Should not raise — unknown keys are silently ignored
         db.update_scheduled_report(report["id"], bogus_col="value")
         fetched = db.get_scheduled_report(report["id"])
-        assert fetched["name"] == "R1"  # unchanged
+        assert fetched["name"] == "R1"

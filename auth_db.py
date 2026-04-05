@@ -130,6 +130,35 @@ class AuthDB:
             cur.execute("ALTER TABLE users ADD COLUMN slack_user_id TEXT")
         except sqlite3.OperationalError:
             pass  # column already exists
+
+        # Migration: add new schedule columns
+        for col in [
+            "schedule_type TEXT",
+            "schedule_days TEXT",
+            "timezone TEXT DEFAULT 'America/Los_Angeles'",
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE scheduled_reports ADD COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass  # already exists
+
+        # Migrate old frequency values to new schedule_type/schedule_days
+        cur.execute("""
+            UPDATE scheduled_reports
+            SET schedule_type = CASE
+                WHEN frequency = 'daily' THEN 'weekly'
+                WHEN frequency = 'weekly' THEN 'weekly'
+                WHEN frequency = 'monthly' THEN 'monthly'
+                ELSE 'weekly'
+            END,
+            schedule_days = CASE
+                WHEN frequency = 'daily' THEN '0,1,2,3,4,5,6'
+                WHEN frequency = 'weekly' THEN CAST(COALESCE(day_of_week, 0) AS TEXT)
+                ELSE NULL
+            END,
+            timezone = COALESCE(timezone, 'America/Los_Angeles')
+            WHERE schedule_type IS NULL
+        """)
         self.conn.commit()
 
     # ── Helpers ───────────────────────────────────────────────────────────
@@ -358,19 +387,23 @@ class AuthDB:
     # ── Scheduled Reports ────────────────────────────────────────────────
 
     def _row_to_report_dict(self, row: sqlite3.Row) -> dict:
+        keys = row.keys()
         return {
             "id": row["id"],
             "name": row["name"],
             "report_type": row["report_type"],
-            "frequency": row["frequency"],
-            "day_of_week": row["day_of_week"],
+            "frequency": row["frequency"] if "frequency" in keys else None,
+            "schedule_type": row["schedule_type"] if "schedule_type" in keys else None,
+            "schedule_days": row["schedule_days"] if "schedule_days" in keys else None,
+            "day_of_week": row["day_of_week"] if "day_of_week" in keys else None,
             "day_of_month": row["day_of_month"],
             "hour_utc": row["hour_utc"],
+            "timezone": row["timezone"] if "timezone" in keys else "America/Los_Angeles",
             "product_filter": row["product_filter"],
             "date_range_days": row["date_range_days"],
             "spreadsheet_id": row["spreadsheet_id"],
-            "slack_webhook": row["slack_webhook"],
-            "slack_channel": row["slack_channel"],
+            "slack_webhook": row["slack_webhook"] if "slack_webhook" in keys else None,
+            "slack_channel": row["slack_channel"] if "slack_channel" in keys else None,
             "created_by": row["created_by"],
             "is_active": bool(row["is_active"]),
             "created_at": row["created_at"],
@@ -380,24 +413,32 @@ class AuthDB:
         self,
         name: str,
         report_type: str,
-        frequency: str,
         hour_utc: int,
         spreadsheet_id: str,
-        slack_webhook: str,
         created_by: str,
+        # New schedule model
+        schedule_type: str = "weekly",
+        schedule_days: str | None = None,
+        timezone: str = "America/Los_Angeles",
+        # Legacy fields (still stored for backward compat)
+        frequency: str | None = None,
         day_of_week: int | None = None,
         day_of_month: int | None = None,
+        # Optional fields
         product_filter: str | None = None,
         date_range_days: int = 30,
+        slack_webhook: str = "",
         slack_channel: str | None = None,
     ) -> dict:
         """Create a scheduled report and return its dict."""
+        if frequency is None:
+            frequency = "weekly" if schedule_type == "weekly" else "monthly"
         cur = self.conn.execute(
             "INSERT INTO scheduled_reports "
             "(name, report_type, frequency, day_of_week, day_of_month, hour_utc, "
             "product_filter, date_range_days, spreadsheet_id, slack_webhook, "
-            "slack_channel, created_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "slack_channel, created_by, schedule_type, schedule_days, timezone) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 report_type,
@@ -411,6 +452,9 @@ class AuthDB:
                 slack_webhook,
                 slack_channel,
                 created_by,
+                schedule_type,
+                schedule_days,
+                timezone,
             ),
         )
         self.conn.commit()
@@ -452,6 +496,9 @@ class AuthDB:
             "slack_webhook",
             "slack_channel",
             "is_active",
+            "schedule_type",
+            "schedule_days",
+            "timezone",
         }
         updates = {k: v for k, v in kwargs.items() if k in allowed_cols}
         if not updates:
