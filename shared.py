@@ -111,6 +111,22 @@ def load_products():
     return get_cache().get_products_df()
 
 
+@st.cache_resource
+def get_auth_db():
+    """Return the shared AuthDB instance."""
+    from auth import get_auth_db as _get_auth_db
+    return _get_auth_db()
+
+
+@st.cache_resource
+def get_scheduler():
+    """Start and return the shared ReportScheduler."""
+    from report_scheduler import ReportScheduler
+    scheduler = ReportScheduler(get_auth_db(), get_cache())
+    scheduler.start()
+    return scheduler
+
+
 def render_doc_tabs(page_methodology: str) -> None:
     """Render standard How It's Calculated / Available Data Points tabs."""
     from methodology import API_DATA_DICTIONARY

@@ -7,3 +7,4 @@ gspread>=6.0,<6.1
 google-auth>=2.48,<2.49
 streamlit-authenticator>=0.4.0,<0.5
 bcrypt>=4.0,<5.0
+apscheduler>=3.10,<4.0
