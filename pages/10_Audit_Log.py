@@ -2,22 +2,14 @@
 
 import streamlit as st
 
-from auth import is_admin, require_auth
+from auth import require_admin, require_auth
 from shared import get_cache, render_sync_sidebar
 
 st.set_page_config(page_title="Audit Log", page_icon=":lock:", layout="wide")
 
 require_auth()
+require_admin()
 render_sync_sidebar()
-
-# ------------------------------------------------------------------
-# Admin gate
-# ------------------------------------------------------------------
-
-username = st.session_state.get("username", "")
-if not is_admin(username):
-    st.error("Access restricted to administrators.")
-    st.stop()
 
 st.title("Audit Log")
 

@@ -5,7 +5,7 @@ import logging
 import streamlit as st
 
 from analytics import build_daily_summary
-from auth import is_admin, require_auth
+from auth import require_admin, require_auth
 from notifications import (
     ManagerConfig,
     NotificationChannel,
@@ -21,16 +21,8 @@ st.set_page_config(
 )
 
 require_auth()
+require_admin()
 render_sync_sidebar()
-
-# ------------------------------------------------------------------
-# Admin gate
-# ------------------------------------------------------------------
-
-username = st.session_state.get("username", "")
-if not is_admin(username):
-    st.error("Access restricted to administrators.")
-    st.stop()
 
 st.title("Report Settings")
 
