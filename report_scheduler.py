@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -10,7 +11,7 @@ from apscheduler.triggers.cron import CronTrigger
 from auth_db import AuthDB
 from cache import SamCartCache
 from gsheets import upload_report
-from notifications import send_slack_sheet_link
+from notifications import send_slack_dm, send_slack_sheet_link
 from report_catalog import REPORT_CATALOG, generate_report
 
 logger = logging.getLogger(__name__)
@@ -19,9 +20,10 @@ logger = logging.getLogger(__name__)
 class ReportScheduler:
     """Manages scheduled report jobs backed by auth_db."""
 
-    def __init__(self, auth_db: AuthDB, cache: SamCartCache):
+    def __init__(self, auth_db: AuthDB, cache: SamCartCache, slack_bot_token: str = ""):
         self.auth_db = auth_db
         self.cache = cache
+        self.slack_bot_token = slack_bot_token
         self.scheduler = BackgroundScheduler()
 
     def start(self) -> None:
@@ -44,18 +46,27 @@ class ReportScheduler:
 
     def _build_trigger(self, report: dict) -> CronTrigger:
         """Build a CronTrigger from report config."""
-        kwargs: dict = {"hour": report["hour_utc"]}
-        if report["frequency"] == "weekly":
-            kwargs["day_of_week"] = report.get("day_of_week", 0)
-        elif report["frequency"] == "monthly":
-            kwargs["day"] = report.get("day_of_month", 1)
-        return CronTrigger(**kwargs)
+        schedule_type = report.get("schedule_type") or report.get("frequency", "weekly")
+        if schedule_type == "monthly":
+            return CronTrigger(hour=report["hour_utc"], day=report.get("day_of_month", 1))
+        # Weekly: fire daily at hour_utc, job checks schedule_days at execution time
+        return CronTrigger(hour=report["hour_utc"])
 
     def _execute_report(self, report_id: int) -> None:
         """Run a single report: generate -> upload -> notify."""
         report = self.auth_db.get_scheduled_report(report_id)
         if not report or not report["is_active"]:
             return
+
+        # Day-of-week check for weekly reports
+        schedule_type = report.get("schedule_type") or report.get("frequency", "weekly")
+        if schedule_type == "weekly":
+            schedule_days = report.get("schedule_days", "0,1,2,3,4,5,6")
+            if schedule_days:
+                today_weekday = datetime.datetime.now(tz=datetime.timezone.utc).weekday()
+                allowed_days = [int(d.strip()) for d in schedule_days.split(",") if d.strip()]
+                if today_weekday not in allowed_days:
+                    return
 
         if report["report_type"] not in REPORT_CATALOG:
             logger.error("Unknown report type: %s", report["report_type"])
@@ -74,12 +85,23 @@ class ReportScheduler:
                 date_range_days=report.get("date_range_days", 30),
                 product_filter=product_filter,
             )
-            sheet_url = upload_report(
-                df, report["spreadsheet_id"], report["name"],
-            )
-            send_slack_sheet_link(
-                report["slack_webhook"], report["name"], sheet_url,
-            )
+            sheet_url = upload_report(df, report["spreadsheet_id"], report["name"])
+
+            # Try Slack DM first, fall back to webhook
+            delivered = False
+            if self.slack_bot_token and report.get("created_by"):
+                creator = self.auth_db.get_user(report["created_by"])
+                if creator and creator.get("slack_user_id"):
+                    delivered = send_slack_dm(
+                        bot_token=self.slack_bot_token,
+                        user_id=creator["slack_user_id"],
+                        report_name=report["name"],
+                        sheet_url=sheet_url,
+                    )
+
+            if not delivered and report.get("slack_webhook"):
+                send_slack_sheet_link(report["slack_webhook"], report["name"], sheet_url)
+
             logger.info("Report delivered: %s", report["name"])
         except Exception:
             logger.exception("Failed to execute report: %s", report["name"])
