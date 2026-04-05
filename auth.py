@@ -5,11 +5,19 @@ from __future__ import annotations
 import logging
 
 import streamlit as st
-import streamlit_authenticator as stauth
 
 from auth_db import AuthDB
 
 logger = logging.getLogger(__name__)
+
+# Keys stored in session_state by the auth system
+_AUTH_SESSION_KEYS = (
+    "authentication_status",
+    "username",
+    "name",
+    "permissions",
+    "user_role",
+)
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
@@ -66,15 +74,30 @@ def _migrate_from_secrets(db: AuthDB) -> None:
 # ── Auth Gate ─────────────────────────────────────────────────────────────────
 
 
+def _logout() -> None:
+    """Clear all auth session state keys and rerun the app."""
+    for key in _AUTH_SESSION_KEYS:
+        st.session_state.pop(key, None)
+    st.rerun()
+
+
 def require_auth() -> None:
     """
     Check authentication status. Shows login form if not authenticated.
-    Fail-closed: requires either auth.db users or [auth] in secrets.toml.
+    Fail-closed: requires auth.db users or [auth] in secrets.toml.
     Must be called immediately after st.set_page_config().
     """
     auth_db = get_auth_db()
 
-    # Build credentials dict from auth.db
+    # ── Already authenticated ──────────────────────────────────────────
+    if st.session_state.get("authentication_status") is True:
+        # Render logout button in sidebar
+        with st.sidebar:
+            if st.button("Logout"):
+                _logout()
+        return
+
+    # ── Not authenticated — show login form ────────────────────────────
     users = auth_db.list_users()
     if not users:
         st.error(
@@ -84,67 +107,34 @@ def require_auth() -> None:
         st.stop()
         return
 
-    credentials: dict = {"usernames": {}}
-    for user in users:
-        if not user["is_active"]:
-            continue
-        # Fetch raw password hash from DB for streamlit-authenticator
-        row = auth_db.conn.execute(
-            "SELECT password_hash FROM users WHERE username = ?",
-            (user["username"],),
-        ).fetchone()
-        if row is None:
-            continue
-        credentials["usernames"][user["username"]] = {
-            "email": user["email"],
-            "name": user["username"],
-            "password": row["password_hash"],
-        }
+    st.markdown("### Login")
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login")
 
-    # Cookie config from secrets (still needed for cookie encryption)
-    try:
-        auth_config = st.secrets["auth"]
-        cookie_key = auth_config.get("cookie_key", "")
-    except (KeyError, FileNotFoundError):
-        cookie_key = ""
+    if submitted:
+        user = auth_db.authenticate(username, password)
+        if user is not None:
+            # Set session state for authenticated user
+            st.session_state["authentication_status"] = True
+            st.session_state["username"] = user["username"]
+            st.session_state["name"] = user["username"]
 
-    if not cookie_key:
-        st.error("Set `cookie_key` in `[auth]` section of `.streamlit/secrets.toml`.")
-        st.stop()
-        return
-
-    auth_config = st.secrets.get("auth", {})
-    authenticator = stauth.Authenticate(
-        credentials=credentials,
-        cookie_name=auth_config.get("cookie_name", "samcart_analytics"),
-        cookie_key=cookie_key,
-        cookie_expiry_days=auth_config.get("cookie_expiry_days", 7),
-    )
-
-    authenticator.login()
-
-    if st.session_state.get("authentication_status") is None:
-        st.warning("Please enter your username and password.")
-        st.stop()
-    elif st.session_state.get("authentication_status") is False:
-        st.error("Username or password is incorrect.")
-        st.stop()
-
-    # Authenticated — render logout in sidebar
-    authenticator.logout("Logout", "sidebar")
-
-    # Load permissions into session state
-    username = st.session_state.get("username", "")
-    if username and "permissions" not in st.session_state:
-        try:
-            st.session_state["permissions"] = auth_db.get_permissions(username)
-            user = auth_db.get_user(username)
-            if user:
+            # Load permissions
+            try:
+                st.session_state["permissions"] = auth_db.get_permissions(user["username"])
                 st.session_state["user_role"] = user["role"]
-        except Exception:
-            logger.exception("Failed to load permissions for %s", username)
-            st.session_state["permissions"] = set()
-            st.session_state["user_role"] = "viewer"
+            except Exception:
+                logger.exception("Failed to load permissions for %s", user["username"])
+                st.session_state["permissions"] = set()
+                st.session_state["user_role"] = "viewer"
+
+            st.rerun()
+        else:
+            st.error("Username or password is incorrect.")
+
+    st.stop()
 
 
 # ── Permission Helpers ────────────────────────────────────────────────────────

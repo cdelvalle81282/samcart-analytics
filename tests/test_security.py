@@ -99,26 +99,30 @@ class TestLikeEscaping:
 
 
 class TestAuthGate:
-    def test_require_auth_stops_when_not_authenticated(self):
-        """require_auth() calls st.stop() when authentication_status is not True."""
+    def test_require_auth_stops_when_no_users(self):
+        """require_auth() calls st.stop() when no users are configured."""
         import sys
 
-        # Ensure fresh import with mocks
-        mock_stauth = MagicMock()
         mock_st = MagicMock()
         mock_st.secrets.__getitem__ = MagicMock(side_effect=KeyError("auth"))
         mock_st.stop = MagicMock(side_effect=SystemExit)
+        mock_st.session_state = {}
 
-        with patch.dict(sys.modules, {"streamlit_authenticator": mock_stauth, "streamlit": mock_st}):
+        # Mock AuthDB to return no users
+        mock_auth_db = MagicMock()
+        mock_auth_db.list_users.return_value = []
+
+        with patch.dict(sys.modules, {"streamlit": mock_st}):
             # Remove cached auth module so it reimports with our mocks
             sys.modules.pop("auth", None)
             from auth import require_auth
 
-            with pytest.raises(SystemExit):
-                require_auth()
+            with patch("auth.get_auth_db", return_value=mock_auth_db):
+                with pytest.raises(SystemExit):
+                    require_auth()
 
-            mock_st.error.assert_called_once()
-            mock_st.stop.assert_called_once()
+                mock_st.error.assert_called_once()
+                mock_st.stop.assert_called_once()
 
         # Clean up so other tests aren't affected
         sys.modules.pop("auth", None)
