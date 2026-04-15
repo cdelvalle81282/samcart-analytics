@@ -7,6 +7,7 @@ from analytics import refund_analysis
 from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import REFUND_ANALYSIS_METHODOLOGY
+from automate import render_automate_button
 from shared import load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(page_title="Refund Analysis", page_icon=":money_with_wings:", layout="wide")
@@ -70,6 +71,7 @@ st.dataframe(
     use_container_width=True,
 )
 render_export_buttons(by_product, "refund_by_product", key_prefix="ref_prod")
+render_automate_button("refund_analysis", "Refund Analysis — By Product", "No filters", key_suffix="by_product")
 
 # ------------------------------------------------------------------
 # Time to refund
@@ -92,6 +94,7 @@ if not time_to_refund.empty:
     m3.metric("Max Days to Refund", f"{time_to_refund['days_to_refund'].max():.0f}")
 else:
     st.info("No time-to-refund data available. Ensure `refund_date` is populated (requires full charge sync).")
+render_automate_button("refund_time_to_refund", "Refund Analysis — Time to Refund", "No filters")
 
 # ------------------------------------------------------------------
 # Monthly refund trend
@@ -121,6 +124,7 @@ if not monthly_trend.empty:
     st.plotly_chart(fig_amt, use_container_width=True)
 else:
     st.info("No monthly refund trend data available.")
+render_automate_button("refund_monthly_trend", "Refund Analysis — Monthly Trend", "No filters")
 
 # ------------------------------------------------------------------
 # Documentation

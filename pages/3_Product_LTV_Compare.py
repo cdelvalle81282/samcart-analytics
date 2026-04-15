@@ -8,6 +8,7 @@ from analytics import to_eastern, product_ltv_ranking
 from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import PRODUCT_LTV_METHODOLOGY
+from automate import render_automate_button
 from shared import load_orders, load_products, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(page_title="Product LTV Compare", page_icon=":package:", layout="wide")
@@ -116,6 +117,16 @@ st.dataframe(
 )
 
 render_export_buttons(ranking, "product_ltv", key_prefix="product")
+
+_ltv_date_range_days = (date_range[1] - date_range[0]).days if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else 365
+_ltv_filters_summary = f"{date_range[0] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else 'All'} | Min orders: {min_orders}"
+render_automate_button(
+    "product_ltv",
+    "Product LTV Compare",
+    _ltv_filters_summary,
+    current_filters={"date_range_days": _ltv_date_range_days},
+    extra_params={"min_orders": int(min_orders)} if min_orders > 0 else None,
+)
 
 # ------------------------------------------------------------------
 # Documentation tabs

@@ -1,5 +1,7 @@
 """Report 9: Product Deep Dive — MRR trend, attach rate, revenue mix."""
 
+import json
+
 import plotly.express as px
 import streamlit as st
 
@@ -15,6 +17,7 @@ from methodology import (
     PRODUCT_MRR_TREND_METHODOLOGY,
     REVENUE_MIX_METHODOLOGY,
 )
+from automate import render_automate_button
 from shared import load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(page_title="Product Deep Dive", page_icon=":package:", layout="wide")
@@ -69,6 +72,7 @@ with tab1:
         )
         render_export_buttons(mrr_df, "product_mrr_trend", key_prefix="mrr_trend")
 
+    render_automate_button("product_deep_dive", "Product Deep Dive — MRR Trend", "No filters", key_suffix="mrr")
     st.markdown("---")
     st.markdown(PRODUCT_MRR_TREND_METHODOLOGY)
 
@@ -118,6 +122,7 @@ with tab2:
         )
         render_export_buttons(attach_df, "product_attach_rate", key_prefix="attach")
 
+    render_automate_button("product_deep_dive_attach", "Product Deep Dive — Attach Rate", "No filters")
     st.markdown("---")
     st.markdown(ATTACH_RATE_METHODOLOGY)
 
@@ -125,15 +130,19 @@ with tab2:
 with tab3:
     mix_df = new_vs_renewal_revenue_mix(charges_df, orders_df, subs_df)
 
+    # Initialize so the automate button below always has a value
+    _mix_all_products: list[str] = []
+    selected_products: list[str] = []
+
     if mix_df.empty:
         st.warning("No revenue mix data available.")
     else:
         # Product filter
-        products = sorted(mix_df["product_name"].dropna().unique().tolist())
+        _mix_all_products = sorted(mix_df["product_name"].dropna().unique().tolist())
         selected_products = st.multiselect(
             "Products",
-            options=products,
-            default=products,
+            options=_mix_all_products,
+            default=_mix_all_products,
             key="mix_product_filter",
         )
         filtered = mix_df[mix_df["product_name"].isin(selected_products)] if selected_products else mix_df
@@ -168,6 +177,16 @@ with tab3:
         else:
             st.info("No data matches the selected products.")
 
+    # Only pass product_filter when it's a real subset; "all products" → None
+    # so the scheduled report picks up future products automatically.
+    _mix_is_subset = selected_products and selected_products != _mix_all_products
+    _mix_products_label = ", ".join(selected_products) if _mix_is_subset else "All"
+    render_automate_button(
+        "product_deep_dive_revenue_mix",
+        "Product Deep Dive — Revenue Mix",
+        f"Products: {_mix_products_label}",
+        current_filters={"product_filter": json.dumps(selected_products) if _mix_is_subset else None},
+    )
     st.markdown("---")
     st.markdown(REVENUE_MIX_METHODOLOGY)
 

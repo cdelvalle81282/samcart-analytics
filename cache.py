@@ -106,6 +106,7 @@ class SamCartCache:
             );
             CREATE INDEX IF NOT EXISTS idx_subs_status ON subscriptions(status);
             CREATE INDEX IF NOT EXISTS idx_subs_created ON subscriptions(created_at);
+            CREATE INDEX IF NOT EXISTS idx_subs_customer ON subscriptions(customer_email);
 
             CREATE TABLE IF NOT EXISTS products (
                 id TEXT PRIMARY KEY,
@@ -127,6 +128,7 @@ class SamCartCache:
             );
             CREATE INDEX IF NOT EXISTS idx_charges_created ON charges(created_at);
             CREATE INDEX IF NOT EXISTS idx_charges_customer ON charges(customer_email);
+            CREATE INDEX IF NOT EXISTS idx_charges_subscription ON charges(subscription_id);
 
             CREATE TABLE IF NOT EXISTS sync_meta (
                 table_name TEXT PRIMARY KEY,

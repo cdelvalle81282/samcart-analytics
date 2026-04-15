@@ -1,5 +1,6 @@
 """Report 4: Daily Metrics — new customers, sales, refunds, renewals by product."""
 
+import json
 import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -15,9 +16,15 @@ from analytics import (
 from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import DAILY_METRICS_METHODOLOGY
+from automate import render_automate_button
 from shared import load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 logger = logging.getLogger(__name__)
+
+
+@st.cache_data(ttl=300)
+def _cached_daily_summary():
+    return build_daily_summary(load_orders(), load_charges(), load_subscriptions())
 
 st.set_page_config(page_title="Daily Metrics", page_icon=":chart_with_upwards_trend:", layout="wide")
 
@@ -39,7 +46,7 @@ if orders_df.empty and charges_df.empty:
 # Build summary data
 # ------------------------------------------------------------------
 
-summary_df = build_daily_summary(orders_df, charges_df, subs_df)
+summary_df = _cached_daily_summary()
 
 if summary_df.empty:
     st.warning("No daily metrics data available.")
@@ -101,6 +108,24 @@ m4.metric("Total Renewals", f"{int(filtered['renewal_count'].sum()):,}")
 # Tabs
 # ------------------------------------------------------------------
 
+# Shared filter metadata for automate buttons
+_products_label = ", ".join(selected_products) if selected_products else "All"
+_date_label = (
+    f"{date_range[0]} to {date_range[1]}"
+    if isinstance(date_range, (list, tuple)) and len(date_range) == 2
+    else "All"
+)
+_filters_summary = f"Products: {_products_label} | {_date_label}"
+_date_range_days = (
+    (date_range[1] - date_range[0]).days
+    if isinstance(date_range, (list, tuple)) and len(date_range) == 2
+    else 30
+)
+_cf = {
+    "product_filter": json.dumps(selected_products) if selected_products != products else None,
+    "date_range_days": _date_range_days,
+}
+
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Daily Summary",
     "New Customers Trend",
@@ -133,6 +158,7 @@ with tab1:
             totals[col] = display_df[col].sum()
     export_df = pd.concat([display_df, pd.DataFrame([totals])], ignore_index=True)
     render_export_buttons(export_df, "daily_summary", key_prefix="daily_summary")
+    render_automate_button("daily_metrics", "Daily Metrics — Daily Summary", _filters_summary, current_filters=_cf, key_suffix="summary")
 
 # --- Tab 2: New Customers Trend ---
 with tab2:
@@ -153,6 +179,7 @@ with tab2:
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No new customer data for selected filters.")
+    render_automate_button("daily_metrics_new_customers", "Daily Metrics — New Customers Trend", _filters_summary, current_filters=_cf)
 
 # --- Tab 3: New Sales Trend ---
 with tab3:
@@ -184,6 +211,7 @@ with tab3:
         st.plotly_chart(fig_rev, use_container_width=True)
     else:
         st.info("No new sales data for selected filters.")
+    render_automate_button("daily_metrics_new_sales", "Daily Metrics — New Sales Trend", _filters_summary, current_filters=_cf)
 
 # --- Tab 4: Refunds Trend ---
 with tab4:
@@ -215,6 +243,7 @@ with tab4:
         st.plotly_chart(fig_ra, use_container_width=True)
     else:
         st.info("No refund data for selected filters.")
+    render_automate_button("daily_metrics_refunds", "Daily Metrics — Refunds Trend", _filters_summary, current_filters=_cf)
 
 # --- Tab 5: Renewals Trend ---
 with tab5:
@@ -246,6 +275,7 @@ with tab5:
         st.plotly_chart(fig_renr, use_container_width=True)
     else:
         st.info("No renewal data for selected filters.")
+    render_automate_button("daily_metrics_renewals", "Daily Metrics — Renewals Trend", _filters_summary, current_filters=_cf)
 
 # --- Tab 6: Entry Product LTV ---
 with tab6:
@@ -273,8 +303,8 @@ with tab6:
         st.dataframe(
             ltv_df,
             column_config={
+                "avg_entry_price": st.column_config.NumberColumn("Avg Entry Price", format="$%.2f"),
                 "avg_ltv": st.column_config.NumberColumn("Avg LTV", format="$%.2f"),
-                "median_ltv": st.column_config.NumberColumn("Median LTV", format="$%.2f"),
                 "total_ltv": st.column_config.NumberColumn("Total LTV", format="$%.2f"),
             },
             use_container_width=True,
@@ -282,6 +312,7 @@ with tab6:
         render_export_buttons(ltv_df, "entry_product_ltv", key_prefix="entry_ltv")
     else:
         st.info("No LTV data available.")
+    render_automate_button("daily_metrics_entry_ltv", "Daily Metrics — Entry Product LTV", _filters_summary, current_filters=_cf)
 
 # ------------------------------------------------------------------
 # Google Sheets upload

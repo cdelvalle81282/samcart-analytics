@@ -1,6 +1,7 @@
 """Admin page: User Management, Permissions, and Scheduled Reports."""
 
 import datetime
+import json
 import logging
 from zoneinfo import ZoneInfo
 
@@ -32,13 +33,22 @@ def _format_schedule(report: dict) -> str:
     except KeyError:
         tz = ZoneInfo("America/Los_Angeles")
 
-    utc_time = datetime.time(report["hour_utc"], 0)
-    utc_dt = datetime.datetime.combine(
-        datetime.date.today(), utc_time, tzinfo=ZoneInfo("UTC")
-    )
-    local_dt = utc_dt.astimezone(tz)
-    local_time = local_dt.strftime("%I:%M %p").lstrip("0")
-    tz_abbr = local_dt.strftime("%Z")
+    # Prefer hour_local (stable across DST) when available; fall back to
+    # reverse-converting hour_utc for legacy records that predate this field.
+    if report.get("hour_local") is not None:
+        local_time = datetime.time(report["hour_local"], report.get("minute_local") or 0)
+        ref_dt = datetime.datetime.combine(datetime.date.today(), local_time, tzinfo=tz)
+        tz_abbr = ref_dt.strftime("%Z")
+    else:
+        utc_time = datetime.time(report["hour_utc"], report.get("minute_utc") or 0)
+        utc_dt = datetime.datetime.combine(
+            datetime.date.today(), utc_time, tzinfo=ZoneInfo("UTC")
+        )
+        local_dt = utc_dt.astimezone(tz)
+        local_time = local_dt.time()
+        tz_abbr = local_dt.strftime("%Z")
+
+    local_time = datetime.time.strftime(local_time, "%I:%M %p").lstrip("0")
 
     schedule_type = report.get("schedule_type", "weekly")
     if schedule_type == "monthly":
@@ -300,6 +310,12 @@ with tab_reports:
                 st.write(
                     f"**Date range:** {report.get('date_range_days', 30)} days"
                 )
+                if report.get("extra_params"):
+                    try:
+                        ep = json.loads(report["extra_params"])
+                        st.write(f"**Extra filters:** {', '.join(f'{k}: {v}' for k, v in ep.items())}")
+                    except (json.JSONDecodeError, TypeError):
+                        pass
                 st.write(f"**Created by:** {report['created_by']}")
 
                 col1, col2 = st.columns(2)
@@ -371,7 +387,10 @@ with tab_reports:
             elif rpt_schedule_type == "Weekly" and not selected_days:
                 st.error("Select at least one day.")
             else:
-                # Convert local time to UTC
+                # Store local hour+minute for DST-aware scheduling; also keep
+                # UTC equivalents for backward-compat.
+                hour_local = rpt_time.hour
+                minute_local = rpt_time.minute
                 local_tz = ZoneInfo(rpt_tz)
                 local_dt = datetime.datetime.combine(
                     datetime.date.today(),
@@ -380,6 +399,7 @@ with tab_reports:
                 )
                 utc_dt = local_dt.astimezone(ZoneInfo("UTC"))
                 hour_utc = utc_dt.hour
+                minute_utc = utc_dt.minute
 
                 try:
                     report = auth_db.create_scheduled_report(
@@ -397,6 +417,9 @@ with tab_reports:
                             else None
                         ),
                         hour_utc=hour_utc,
+                        hour_local=hour_local,
+                        minute_utc=minute_utc,
+                        minute_local=minute_local,
                         timezone=rpt_tz,
                         spreadsheet_id=rpt_sheet,
                         created_by=current_user,

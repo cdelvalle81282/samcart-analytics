@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -45,12 +46,20 @@ class ReportScheduler:
         )
 
     def _build_trigger(self, report: dict) -> CronTrigger:
-        """Build a CronTrigger from report config."""
+        """Build a timezone-aware CronTrigger so APScheduler handles DST."""
         schedule_type = report.get("schedule_type") or report.get("frequency", "weekly")
+        tz = report.get("timezone") or "UTC"
+        # Prefer hour_local/minute_local (DST-aware path). Fall back to hour_utc/
+        # minute_utc for legacy records created before these columns were added.
+        if report.get("hour_local") is not None:
+            hour = report["hour_local"]
+            minute = report.get("minute_local") or 0
+        else:
+            hour = report["hour_utc"]
+            minute = report.get("minute_utc") or 0
         if schedule_type == "monthly":
-            return CronTrigger(hour=report["hour_utc"], day=report.get("day_of_month", 1))
-        # Weekly: fire daily at hour_utc, job checks schedule_days at execution time
-        return CronTrigger(hour=report["hour_utc"])
+            return CronTrigger(hour=hour, minute=minute, day=report.get("day_of_month", 1), timezone=tz)
+        return CronTrigger(hour=hour, minute=minute, timezone=tz)
 
     def _execute_report(self, report_id: int) -> None:
         """Run a single report: generate -> upload -> notify."""
@@ -58,12 +67,19 @@ class ReportScheduler:
         if not report or not report["is_active"]:
             return
 
-        # Day-of-week check for weekly reports
+        # Day-of-week check for weekly reports — use the report's local timezone
+        # so schedules near midnight don't fire on the wrong local day
         schedule_type = report.get("schedule_type") or report.get("frequency", "weekly")
         if schedule_type == "weekly":
             schedule_days = report.get("schedule_days", "0,1,2,3,4,5,6")
             if schedule_days:
-                today_weekday = datetime.datetime.now(tz=datetime.timezone.utc).weekday()
+                from zoneinfo import ZoneInfo
+                tz_name = report.get("timezone") or "UTC"
+                try:
+                    local_tz = ZoneInfo(tz_name)
+                except Exception:
+                    local_tz = datetime.timezone.utc
+                today_weekday = datetime.datetime.now(tz=local_tz).weekday()
                 allowed_days = [int(d.strip()) for d in schedule_days.split(",") if d.strip()]
                 if today_weekday not in allowed_days:
                     return
@@ -72,11 +88,25 @@ class ReportScheduler:
             logger.error("Unknown report type: %s", report["report_type"])
             return
 
-        product_filter = (
-            report["product_filter"].split(",")
-            if report.get("product_filter")
-            else None
-        )
+        raw_pf = report.get("product_filter")
+        if raw_pf:
+            try:
+                product_filter = json.loads(raw_pf)
+                if not isinstance(product_filter, list):
+                    product_filter = [str(product_filter)]
+            except (json.JSONDecodeError, TypeError):
+                # Legacy records stored as comma-separated strings
+                product_filter = [p.strip() for p in raw_pf.split(",") if p.strip()]
+        else:
+            product_filter = None
+
+        extra_params: dict = {}
+        raw_extra = report.get("extra_params")
+        if raw_extra:
+            try:
+                extra_params = json.loads(raw_extra)
+            except (json.JSONDecodeError, TypeError):
+                extra_params = {}
 
         try:
             df = generate_report(
@@ -84,6 +114,7 @@ class ReportScheduler:
                 self.cache,
                 date_range_days=report.get("date_range_days", 30),
                 product_filter=product_filter,
+                **extra_params,
             )
             sheet_url = upload_report(df, report["spreadsheet_id"], report["name"])
 

@@ -8,7 +8,27 @@ from analytics import build_cohort_heatmap, build_cohort_performance
 from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import COHORT_RETENTION_METHODOLOGY
+from automate import render_automate_button
 from shared import load_charges, load_orders, load_products, load_subscriptions, render_doc_tabs, render_sync_sidebar
+
+
+@st.cache_data(ttl=300)
+def _cached_cohort_performance(product_filter, interval_filter):
+    return build_cohort_performance(
+        load_charges(), load_orders(), load_subscriptions(),
+        product_filter=product_filter,
+        interval_filter=interval_filter,
+    )
+
+
+@st.cache_data(ttl=300)
+def _cached_cohort_heatmap(product_filter, interval_filter):
+    return build_cohort_heatmap(
+        load_charges(), load_orders(), load_subscriptions(),
+        product_filter=product_filter,
+        interval_filter=interval_filter,
+    )
+
 
 st.set_page_config(
     page_title="Subscription Cohorts",
@@ -22,9 +42,7 @@ render_sync_sidebar()
 
 st.title("Cohort Performance Report")
 
-charges_df = load_charges()
 subs_df = load_subscriptions()
-orders_df = load_orders()
 products_df = load_products()
 
 if subs_df.empty:
@@ -153,15 +171,22 @@ def _add_period_label(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     return out
 
 
+# Shared automate metadata
+_cohort_product_label = selected_product if selected_product != "All Products" else "All"
+_cohort_interval_label = selected_interval if selected_interval != "All Intervals" else "All"
+_cohort_filters_summary = f"Product: {_cohort_product_label} | Interval: {_cohort_interval_label}"
+_cohort_ep: dict = {}
+if product_filter:
+    _cohort_ep["product_id"] = product_filter
+if interval_filter:
+    _cohort_ep["interval_filter"] = interval_filter
+
 # ------------------------------------------------------------------
 # Section A: Activity Summary (Combined mode)
 # ------------------------------------------------------------------
 
 if cohort_view == "Combined":
-    activity, renewal_rates, stick_rates = build_cohort_performance(
-        charges_df,
-        orders_df,
-        subs_df,
+    activity, renewal_rates, stick_rates = _cached_cohort_performance(
         product_filter=product_filter,
         interval_filter=interval_filter,
     )
@@ -242,6 +267,10 @@ if cohort_view == "Combined":
             display_stick, "cohort_stick_rates", key_prefix="stick"
         )
 
+    render_automate_button("cohort_activity", "Cohorts — Activity Summary", _cohort_filters_summary, extra_params=_cohort_ep, key_suffix="activity")
+    render_automate_button("cohort_renewal_rates", "Cohorts — Renewal Rates", _cohort_filters_summary, extra_params=_cohort_ep, key_suffix="renewal")
+    render_automate_button("cohort_stick_rates", "Cohorts — Stick & Refund Rates", _cohort_filters_summary, extra_params=_cohort_ep, key_suffix="stick")
+
 # ------------------------------------------------------------------
 # Section D: Retention Heatmap (Per-Period mode)
 # ------------------------------------------------------------------
@@ -253,10 +282,7 @@ if cohort_view == "Per-Period":
         "that billing period."
     )
 
-    heatmap_result = build_cohort_heatmap(
-        charges_df,
-        orders_df,
-        subs_df,
+    heatmap_result = _cached_cohort_heatmap(
         product_filter=product_filter,
         interval_filter=interval_filter,
     )
@@ -303,6 +329,7 @@ if cohort_view == "Per-Period":
             "cohort_retention_heatmap",
             key_prefix="heatmap",
         )
+    render_automate_button("cohort_heatmap", "Cohorts — Retention Heatmap", _cohort_filters_summary, extra_params=_cohort_ep)
 
 # ------------------------------------------------------------------
 # Methodology & Data Dictionary

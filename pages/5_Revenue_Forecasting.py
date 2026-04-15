@@ -11,6 +11,7 @@ from methodology import (
     MRR_WATERFALL_METHODOLOGY,
     REVENUE_FORECAST_METHODOLOGY,
 )
+from automate import render_automate_button
 from shared import load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(page_title="Revenue Forecasting", page_icon=":crystal_ball:", layout="wide")
@@ -87,6 +88,7 @@ with tab1:
         )
         render_export_buttons(waterfall_df, "mrr_waterfall", key_prefix="mrr_wf")
 
+    render_automate_button("mrr_waterfall", "Revenue Forecasting — MRR Waterfall", "No filters")
     st.markdown("---")
     st.markdown(MRR_WATERFALL_METHODOLOGY)
 
@@ -127,6 +129,7 @@ with tab2:
         )
         render_export_buttons(forecast_df, "revenue_forecast", key_prefix="rev_fc")
 
+    render_automate_button("revenue_forecast", "Revenue Forecasting — Revenue Forecast", "No filters")
     st.markdown("---")
     st.markdown(REVENUE_FORECAST_METHODOLOGY)
 

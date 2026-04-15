@@ -11,6 +11,7 @@ from methodology import (
     MULTI_PRODUCT_METHODOLOGY,
     RFM_METHODOLOGY,
 )
+from automate import render_automate_button
 from shared import load_charges, load_orders, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(page_title="Customer Segments", page_icon=":busts_in_silhouette:", layout="wide")
@@ -92,6 +93,8 @@ with tab1:
             use_container_width=True,
         )
         render_export_buttons(display_rfm, "rfm_segments", key_prefix="rfm")
+        _rfm_ep = {"segment_filter": selected_segment} if selected_segment != "All" else None
+        render_automate_button("customer_segments", "Customer Segments — RFM", f"Segment: {selected_segment}", extra_params=_rfm_ep)
 
     st.markdown("---")
     st.markdown(RFM_METHODOLOGY)
@@ -130,6 +133,7 @@ with tab2:
 
         st.dataframe(product_combos, use_container_width=True)
 
+    render_automate_button("customer_segments_multi_product", "Customer Segments — Multi-Product Buyers", "No filters")
     st.markdown("---")
     st.markdown(MULTI_PRODUCT_METHODOLOGY)
 
@@ -191,6 +195,7 @@ with tab3:
         )
         render_export_buttons(conc_df, "customer_concentration", key_prefix="conc")
 
+    render_automate_button("customer_segments_concentration", "Customer Segments — Revenue Concentration", "No filters")
     st.markdown("---")
     st.markdown(CONCENTRATION_METHODOLOGY)
 

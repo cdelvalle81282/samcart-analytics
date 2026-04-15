@@ -142,7 +142,28 @@ class AuthDB:
             except sqlite3.OperationalError:
                 pass  # already exists
 
-        # Migrate old frequency values to new schedule_type/schedule_days
+        # Migration: add extra_params column for per-tab filter storage
+        try:
+            cur.execute("ALTER TABLE scheduled_reports ADD COLUMN extra_params TEXT")
+        except sqlite3.OperationalError:
+            pass  # already exists
+
+        # Migration: add hour_local so the scheduler can use a timezone-aware
+        # CronTrigger and APScheduler handles DST transitions correctly
+        try:
+            cur.execute("ALTER TABLE scheduled_reports ADD COLUMN hour_local INTEGER")
+        except sqlite3.OperationalError:
+            pass  # already exists
+
+        # Migration: add minute columns so sub-hour delivery times are preserved.
+        # DEFAULT 0 is correct for all existing records (they were always at :00).
+        for _col in ["minute_utc INTEGER DEFAULT 0", "minute_local INTEGER DEFAULT 0"]:
+            try:
+                cur.execute(f"ALTER TABLE scheduled_reports ADD COLUMN {_col}")
+            except sqlite3.OperationalError:
+                pass  # already exists
+
+        # Migrate old frequency values to new schedule_type/schedule_days.
         cur.execute("""
             UPDATE scheduled_reports
             SET schedule_type = CASE
@@ -159,6 +180,14 @@ class AuthDB:
             timezone = COALESCE(timezone, 'America/Los_Angeles')
             WHERE schedule_type IS NULL
         """)
+
+        # hour_local is intentionally NOT backfilled for legacy rows. Reverse-
+        # converting hour_utc → local using today's DST offset would permanently
+        # shift any schedule created during a different DST season. Legacy records
+        # (hour_local IS NULL) keep their original UTC-based CronTrigger, which is
+        # consistent with how they were always scheduled. Only records created after
+        # this migration get the DST-aware timezone CronTrigger.
+
         self.conn.commit()
 
     # ── Helpers ───────────────────────────────────────────────────────────
@@ -407,6 +436,10 @@ class AuthDB:
             "created_by": row["created_by"],
             "is_active": bool(row["is_active"]),
             "created_at": row["created_at"],
+            "extra_params": row["extra_params"] if "extra_params" in keys else None,
+            "hour_local": row["hour_local"] if "hour_local" in keys else None,
+            "minute_utc": row["minute_utc"] if "minute_utc" in keys else 0,
+            "minute_local": row["minute_local"] if "minute_local" in keys else 0,
         }
 
     def create_scheduled_report(
@@ -429,6 +462,10 @@ class AuthDB:
         date_range_days: int = 30,
         slack_webhook: str = "",
         slack_channel: str | None = None,
+        extra_params: str | None = None,
+        hour_local: int | None = None,
+        minute_utc: int = 0,
+        minute_local: int = 0,
     ) -> dict:
         """Create a scheduled report and return its dict."""
         if frequency is None:
@@ -437,8 +474,9 @@ class AuthDB:
             "INSERT INTO scheduled_reports "
             "(name, report_type, frequency, day_of_week, day_of_month, hour_utc, "
             "product_filter, date_range_days, spreadsheet_id, slack_webhook, "
-            "slack_channel, created_by, schedule_type, schedule_days, timezone) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "slack_channel, created_by, schedule_type, schedule_days, timezone, "
+            "extra_params, hour_local, minute_utc, minute_local) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 report_type,
@@ -455,6 +493,10 @@ class AuthDB:
                 schedule_type,
                 schedule_days,
                 timezone,
+                extra_params,
+                hour_local,
+                minute_utc,
+                minute_local,
             ),
         )
         self.conn.commit()
@@ -499,6 +541,10 @@ class AuthDB:
             "schedule_type",
             "schedule_days",
             "timezone",
+            "extra_params",
+            "hour_local",
+            "minute_utc",
+            "minute_local",
         }
         updates = {k: v for k, v in kwargs.items() if k in allowed_cols}
         if not updates:

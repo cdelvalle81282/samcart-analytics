@@ -11,6 +11,7 @@ from methodology import (
     SUBSCRIPTION_AGING_METHODOLOGY,
     TRIAL_CONVERSION_METHODOLOGY,
 )
+from automate import render_automate_button
 from shared import load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 st.set_page_config(page_title="Subscription Health", page_icon=":heartbeat:", layout="wide")
@@ -92,6 +93,8 @@ with tab1:
         )
         st.plotly_chart(fig_active, use_container_width=True)
 
+    render_automate_button("subscription_health", "Subscription Health — Churn by Product", "No filters", key_suffix="churn")
+    render_automate_button("subscription_health_churn_trend", "Subscription Health — Churn Trend", "No filters", key_suffix="churn_trend")
     st.markdown("---")
     st.markdown(CHURN_ANALYSIS_METHODOLOGY)
 
@@ -130,6 +133,7 @@ with tab2:
         )
         render_export_buttons(trial_df, "trial_conversion", key_prefix="trial_conv")
 
+    render_automate_button("subscription_health_trial", "Subscription Health — Trial-to-Paid", "No filters")
     st.markdown("---")
     st.markdown(TRIAL_CONVERSION_METHODOLOGY)
 
@@ -171,6 +175,7 @@ with tab3:
         st.dataframe(aging_df, use_container_width=True)
         render_export_buttons(aging_df, "subscription_aging", key_prefix="sub_aging")
 
+    render_automate_button("subscription_health_aging", "Subscription Health — Subscription Aging", "No filters")
     st.markdown("---")
     st.markdown(SUBSCRIPTION_AGING_METHODOLOGY)
 

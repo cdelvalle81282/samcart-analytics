@@ -10,7 +10,7 @@ from auth import is_admin, require_auth
 from pii_access import check_pii_access
 from export import cleanup_old_exports
 from methodology import DASHBOARD_METHODOLOGY
-from shared import get_cache, load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
+from shared import load_charges, load_customers, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
 from version import LAST_UPDATED, VERSION
 
 logger = logging.getLogger(__name__)
@@ -46,11 +46,6 @@ if st.sidebar.button("Clean Up Old Exports", use_container_width=True):
 # ------------------------------------------------------------------
 
 st.title("Dashboard")
-
-@st.cache_data(ttl=300)
-def load_customers():
-    return get_cache().get_customers_df()
-
 
 orders_df = load_orders()
 subs_df = load_subscriptions()

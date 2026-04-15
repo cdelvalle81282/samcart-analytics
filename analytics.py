@@ -471,26 +471,20 @@ def build_cohort_heatmap(
     max_period = int(df["period"].max()) if not df["period"].isna().all() else 0
     max_period = min(max_period, 52)
 
-    rows = []
-    for cohort in cohorts_sorted:
-        size = cohort_sizes[cohort]
-        if size == 0:
-            continue
-        row = {"cohort": str(cohort), "cohort_size": size}
-        cohort_retention = retention[retention["cohort_period"] == cohort]
-        for period in range(max_period + 1):
-            match = cohort_retention[cohort_retention["period"] == period]
-            if not match.empty:
-                row[period] = match["active_count"].iloc[0] / size * 100
-            else:
-                row[period] = 0.0
-        rows.append(row)
-
-    if not rows:
+    if retention.empty:
         return pd.DataFrame()
 
-    result = pd.DataFrame(rows).set_index("cohort")
-    result.index.name = "cohort"
+    pivot = retention.pivot_table(
+        index="cohort_period", columns="period",
+        values="active_count", fill_value=0,
+    )
+    pivot = pivot.reindex(columns=range(max_period + 1), fill_value=0)
+    pivot = pivot.reindex(index=cohorts_sorted).fillna(0)
+    pivot = pivot.div(cohort_sizes, axis=0) * 100
+    pivot.insert(0, "cohort_size", cohort_sizes)
+    pivot.index = pivot.index.astype(str)
+    pivot.index.name = "cohort"
+    result = pivot
 
     return result
 
@@ -984,9 +978,9 @@ def new_customer_ltv_by_entry_product(
     When start_date/end_date are provided, only customers whose first purchase
     falls within that range are included. Their LTV still reflects all-time spend.
 
-    Returns: product_id, product_name, customer_count, avg_ltv, median_ltv, total_ltv
+    Returns: product_id, product_name, customer_count, avg_entry_price, avg_ltv, total_ltv
     """
-    cols = ["product_id", "product_name", "customer_count", "avg_ltv", "median_ltv", "total_ltv"]
+    cols = ["product_id", "product_name", "customer_count", "avg_entry_price", "avg_ltv", "total_ltv"]
     if orders_df.empty:
         return pd.DataFrame(columns=cols)
 
@@ -998,7 +992,7 @@ def new_customer_ltv_by_entry_product(
 
     # Find each customer's first order -> entry product
     first_order_idx = odf.groupby("customer_email")["created_at"].idxmin()
-    first_orders = odf.loc[first_order_idx, ["customer_email", "created_at", "product_id", "product_name"]]
+    first_orders = odf.loc[first_order_idx, ["customer_email", "created_at", "product_id", "product_name", "total"]]
 
     # Filter to customers whose entry date falls within the date range
     if start_date is not None:
@@ -1022,8 +1016,8 @@ def new_customer_ltv_by_entry_product(
         merged.groupby(["entry_product_id", "entry_product_name"])
         .agg(
             customer_count=("customer_email", "count"),
+            avg_entry_price=("total", "mean"),
             avg_ltv=("total_spend", "mean"),
-            median_ltv=("total_spend", "median"),
             total_ltv=("total_spend", "sum"),
         )
         .reset_index()
