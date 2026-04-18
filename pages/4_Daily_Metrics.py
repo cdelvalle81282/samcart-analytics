@@ -11,6 +11,7 @@ import streamlit as st
 
 from analytics import (
     build_daily_summary,
+    ltv_progression_by_entry_product,
     new_customer_ltv_by_entry_product,
 )
 from auth import require_auth, require_permission
@@ -281,19 +282,57 @@ with tab5:
 with tab6:
     ltv_start = date_range[0] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else None
     ltv_end = date_range[1] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else None
+
+    _ltv_col1, _ltv_col2 = st.columns([3, 1])
+    with _ltv_col1:
+        _window_options = {"30 days": 30, "60 days": 60, "90 days": 90, "180 days": 180, "All time": None}
+        _window_label = st.radio(
+            "LTV window",
+            options=list(_window_options.keys()),
+            index=2,
+            horizontal=True,
+            key="ltv_window_radio",
+        )
+    with _ltv_col2:
+        _custom_days = st.number_input(
+            "Custom (days)",
+            min_value=1,
+            max_value=3650,
+            value=90,
+            step=30,
+            key="ltv_window_custom",
+            help="Enter a custom number of days — overrides the selection above when changed.",
+        )
+
+    _chosen_window: int | None
+    if _custom_days != 90 or _window_label == "Custom":
+        _chosen_window = int(_custom_days)
+        _window_display = f"{_custom_days}-day"
+    else:
+        _chosen_window = _window_options[_window_label]
+        _window_display = _window_label if _chosen_window is None else f"{_chosen_window}-day"
+
     ltv_df = new_customer_ltv_by_entry_product(
-        orders_df, charges_df, subs_df, start_date=ltv_start, end_date=ltv_end,
+        orders_df, charges_df, subs_df,
+        start_date=ltv_start, end_date=ltv_end,
+        ltv_window_days=_chosen_window,
     )
     if selected_products:
         ltv_df = ltv_df[ltv_df["product_name"].isin(selected_products)]
     if not ltv_df.empty:
+        _chart_title = f"Average {_window_display} LTV by Entry Product"
+        if _chosen_window is not None:
+            st.caption(
+                f"Only customers whose first purchase was at least {_chosen_window} days ago are included "
+                f"(mature cohorts). Revenue counted within {_chosen_window} days of first purchase."
+            )
         fig_ltv = px.bar(
             ltv_df,
             x="product_name",
             y="avg_ltv",
             text="customer_count",
-            labels={"avg_ltv": "Average LTV ($)", "product_name": "Entry Product", "customer_count": "Customers"},
-            title="Average LTV by Entry Product",
+            labels={"avg_ltv": f"Avg {_window_display} LTV ($)", "product_name": "Entry Product", "customer_count": "Customers"},
+            title=_chart_title,
         )
         fig_ltv.update_traces(texttemplate="%{text} customers", textposition="outside")
         fig_ltv.update_layout(yaxis_tickformat="$,.0f")
@@ -304,14 +343,53 @@ with tab6:
             ltv_df,
             column_config={
                 "avg_entry_price": st.column_config.NumberColumn("Avg Entry Price", format="$%.2f"),
-                "avg_ltv": st.column_config.NumberColumn("Avg LTV", format="$%.2f"),
+                "avg_ltv": st.column_config.NumberColumn(f"Avg {_window_display} LTV", format="$%.2f"),
                 "total_ltv": st.column_config.NumberColumn("Total LTV", format="$%.2f"),
             },
             use_container_width=True,
         )
         render_export_buttons(ltv_df, "entry_product_ltv", key_prefix="entry_ltv")
     else:
-        st.info("No LTV data available.")
+        st.info(
+            "No LTV data available."
+            + (f" Try a smaller window — cohorts need at least {_chosen_window} days to mature." if _chosen_window else "")
+        )
+
+    # LTV progression chart: avg LTV at 30/60/90/180/365 days per product
+    st.markdown("---")
+    st.subheader("LTV Progression Over Time")
+    st.caption(
+        "Shows how average LTV grows at 30, 60, 90, 180, and 365 days after first purchase. "
+        "Each window only includes customers whose cohort has fully matured."
+    )
+    prog_df = ltv_progression_by_entry_product(
+        orders_df, charges_df, subs_df, start_date=ltv_start, end_date=ltv_end,
+    )
+    if selected_products:
+        prog_df = prog_df[prog_df["product_name"].isin(selected_products)]
+    if not prog_df.empty:
+        fig_prog = px.line(
+            prog_df,
+            x="window_days",
+            y="avg_ltv",
+            color="product_name",
+            markers=True,
+            labels={
+                "window_days": "Days Since First Purchase",
+                "avg_ltv": "Avg LTV ($)",
+                "product_name": "Entry Product",
+            },
+            title="Average LTV Growth by Days Since First Purchase",
+        )
+        fig_prog.update_layout(
+            xaxis=dict(tickvals=[30, 60, 90, 180, 365]),
+            yaxis_tickformat="$,.0f",
+        )
+        st.plotly_chart(fig_prog, use_container_width=True)
+        render_export_buttons(prog_df, "ltv_progression", key_prefix="ltv_prog")
+    else:
+        st.info("Not enough mature cohort data to build a progression chart.")
+
     render_automate_button("daily_metrics_entry_ltv", "Daily Metrics — Entry Product LTV", _filters_summary, current_filters=_cf)
 
 # ------------------------------------------------------------------

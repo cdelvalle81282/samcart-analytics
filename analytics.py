@@ -965,54 +965,101 @@ def build_daily_summary(
     return result.sort_values(["date", "product_name"]).reset_index(drop=True)
 
 
-def new_customer_ltv_by_entry_product(
+def _prepare_ltv_base(
     orders_df: pd.DataFrame,
     charges_df: pd.DataFrame,
-    subscriptions_df: pd.DataFrame,
     start_date=None,
     end_date=None,
-) -> pd.DataFrame:
+):
     """
-    LTV analysis grouped by each customer's entry product (first purchase).
+    Shared data prep for LTV functions.
 
-    When start_date/end_date are provided, only customers whose first purchase
-    falls within that range are included. Their LTV still reflects all-time spend.
+    Returns (first_orders, charges_with_ts, odf) where:
+    - first_orders: one row per customer with first_purchase_at, entry_product_id/name, total
+    - charges_with_ts: charges_df with created_at converted to Eastern (may be empty)
+    - odf: orders_df with created_at converted to Eastern
 
-    Returns: product_id, product_name, customer_count, avg_entry_price, avg_ltv, total_ltv
+    Returns (None, None, None) if there is no usable data.
     """
-    cols = ["product_id", "product_name", "customer_count", "avg_entry_price", "avg_ltv", "total_ltv"]
     if orders_df.empty:
-        return pd.DataFrame(columns=cols)
+        return None, None, None
 
     odf = orders_df.copy()
     odf["created_at"] = _to_eastern(odf["created_at"])
     odf = odf.dropna(subset=["created_at"])
     if odf.empty:
-        return pd.DataFrame(columns=cols)
+        return None, None, None
 
-    # Find each customer's first order -> entry product
     first_order_idx = odf.groupby("customer_email")["created_at"].idxmin()
-    first_orders = odf.loc[first_order_idx, ["customer_email", "created_at", "product_id", "product_name", "total"]]
+    first_orders = odf.loc[
+        first_order_idx, ["customer_email", "created_at", "product_id", "product_name", "total"]
+    ].copy()
 
-    # Filter to customers whose entry date falls within the date range
     if start_date is not None:
         first_orders = first_orders[first_orders["created_at"].dt.date >= start_date]
     if end_date is not None:
         first_orders = first_orders[first_orders["created_at"].dt.date <= end_date]
 
-    first_orders = first_orders.drop(columns=["created_at"])
     first_orders = first_orders.rename(columns={
         "product_id": "entry_product_id",
         "product_name": "entry_product_name",
+        "created_at": "first_purchase_at",
     })
 
-    # Total spend per customer from collected charges (net of partial refunds)
-    spend = _customer_net_spend(charges_df, odf)
+    charges_with_ts = pd.DataFrame()
+    if not charges_df.empty:
+        charges_with_ts = charges_df.copy()
+        charges_with_ts["created_at"] = _to_eastern(charges_with_ts["created_at"])
+        charges_with_ts = charges_with_ts.dropna(subset=["created_at"])
+        # Pre-join first purchase date so windowing is a single filter step
+        charges_with_ts = charges_with_ts.merge(
+            first_orders[["customer_email", "first_purchase_at"]],
+            on="customer_email",
+            how="inner",
+        )
+        charges_with_ts["days_since_first"] = (
+            charges_with_ts["created_at"] - charges_with_ts["first_purchase_at"]
+        ).dt.days
 
-    merged = first_orders.merge(spend, on="customer_email", how="left")
+    return first_orders, charges_with_ts, odf
+
+
+def _agg_ltv_for_window(first_orders, charges_with_ts, odf, window_days):
+    """
+    Given pre-prepared base data, compute avg_ltv per entry product for one window.
+
+    window_days=None means all-time (no cohort maturity filter, all charges).
+    Returns DataFrame with [entry_product_id, entry_product_name, customer_count,
+                             avg_entry_price, avg_ltv, total_ltv].
+    """
+    fo = first_orders.copy()
+
+    if window_days is not None:
+        cutoff = pd.Timestamp.now(tz="America/New_York") - pd.Timedelta(days=window_days)
+        fo = fo[fo["first_purchase_at"] <= cutoff]
+
+    if fo.empty:
+        return pd.DataFrame(columns=["entry_product_id", "entry_product_name",
+                                     "customer_count", "avg_entry_price", "avg_ltv", "total_ltv"])
+
+    if window_days is not None and not charges_with_ts.empty:
+        cdf = charges_with_ts[
+            charges_with_ts["customer_email"].isin(fo["customer_email"])
+            & (charges_with_ts["days_since_first"] >= 0)
+            & (charges_with_ts["days_since_first"] <= window_days)
+        ]
+        spend = _customer_net_spend(cdf, odf[odf["customer_email"].isin(fo["customer_email"])])
+    else:
+        spend = _customer_net_spend(
+            charges_with_ts[charges_with_ts["customer_email"].isin(fo["customer_email"])]
+            if not charges_with_ts.empty else pd.DataFrame(),
+            odf,
+        )
+
+    merged = fo.merge(spend, on="customer_email", how="left")
     merged["total_spend"] = merged["total_spend"].fillna(0.0)
 
-    result = (
+    return (
         merged.groupby(["entry_product_id", "entry_product_name"])
         .agg(
             customer_count=("customer_email", "count"),
@@ -1021,10 +1068,88 @@ def new_customer_ltv_by_entry_product(
             total_ltv=("total_spend", "sum"),
         )
         .reset_index()
-        .rename(columns={"entry_product_id": "product_id", "entry_product_name": "product_name"})
     )
 
-    return result.sort_values("total_ltv", ascending=False).reset_index(drop=True)
+
+def new_customer_ltv_by_entry_product(
+    orders_df: pd.DataFrame,
+    charges_df: pd.DataFrame,
+    subscriptions_df: pd.DataFrame,
+    start_date=None,
+    end_date=None,
+    ltv_window_days: int | None = None,
+) -> pd.DataFrame:
+    """
+    LTV analysis grouped by each customer's entry product (first purchase).
+
+    When start_date/end_date are provided, only customers whose first purchase
+    falls within that range are included.
+
+    When ltv_window_days is set, only charges within that many days of the
+    customer's first purchase are counted. Customers whose cohort hasn't
+    matured (first purchase < ltv_window_days ago) are excluded so the
+    average isn't dragged down by incomplete windows.
+
+    Returns: product_id, product_name, customer_count, avg_entry_price, avg_ltv, total_ltv
+    """
+    cols = ["product_id", "product_name", "customer_count", "avg_entry_price", "avg_ltv", "total_ltv"]
+
+    first_orders, charges_with_ts, odf = _prepare_ltv_base(orders_df, charges_df, start_date, end_date)
+    if first_orders is None:
+        return pd.DataFrame(columns=cols)
+    if first_orders.empty:
+        return pd.DataFrame(columns=cols)
+
+    result = _agg_ltv_for_window(first_orders, charges_with_ts, odf, ltv_window_days)
+    if result.empty:
+        return pd.DataFrame(columns=cols)
+
+    return (
+        result.rename(columns={"entry_product_id": "product_id", "entry_product_name": "product_name"})
+        .sort_values("total_ltv", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
+LTV_PROGRESSION_WINDOWS = [30, 60, 90, 180, 365]
+
+
+def ltv_progression_by_entry_product(
+    orders_df: pd.DataFrame,
+    charges_df: pd.DataFrame,
+    subscriptions_df: pd.DataFrame,
+    start_date=None,
+    end_date=None,
+    windows: list[int] | None = None,
+) -> pd.DataFrame:
+    """
+    Average LTV at each time window (30/60/90/180/365 days) per entry product.
+
+    Only cohorts mature enough for each window are included — a product's
+    customer_count may decrease at longer windows as recent buyers are excluded.
+
+    Returns tidy DataFrame: window_days, product_name, avg_ltv, customer_count
+    """
+    cols = ["window_days", "product_name", "avg_ltv", "customer_count"]
+    if windows is None:
+        windows = LTV_PROGRESSION_WINDOWS
+
+    first_orders, charges_with_ts, odf = _prepare_ltv_base(orders_df, charges_df, start_date, end_date)
+    if first_orders is None or first_orders.empty:
+        return pd.DataFrame(columns=cols)
+
+    rows = []
+    for w in windows:
+        agg = _agg_ltv_for_window(first_orders, charges_with_ts, odf, w)
+        if not agg.empty:
+            agg["window_days"] = w
+            rows.append(agg[["window_days", "entry_product_name", "avg_ltv", "customer_count"]]
+                        .rename(columns={"entry_product_name": "product_name"}))
+
+    if not rows:
+        return pd.DataFrame(columns=cols)
+
+    return pd.concat(rows, ignore_index=True)
 
 
 # ------------------------------------------------------------------
