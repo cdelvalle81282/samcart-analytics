@@ -633,6 +633,107 @@ def monthly_revenue_summary(
 # ------------------------------------------------------------------
 
 
+def _upsell_product_corrections(
+    charges_df: pd.DataFrame,
+    orders_df: pd.DataFrame,
+    subscriptions_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Detect upsell charges that SamCart files against the parent order rather
+    than creating a dedicated order record.
+
+    Pattern: an order has N charges (N > 1), the non-primary charges have
+    empty subscription_id, and there's a subscription created within 5 minutes
+    by the same customer whose price exactly matches the charge amount and whose
+    product differs from the order's product.
+
+    Primary charge = the one whose amount is closest to orders.total.
+
+    Returns DataFrame with columns [id, product_id, product_name] for charges
+    that should be re-attributed.
+    """
+    empty = pd.DataFrame(columns=["id", "product_id", "product_name"])
+    if charges_df.empty or orders_df.empty or subscriptions_df.empty:
+        return empty
+
+    required_charge_cols = {"id", "order_id", "subscription_id", "customer_email", "amount", "created_at"}
+    if not required_charge_cols.issubset(charges_df.columns):
+        return empty
+
+    df = charges_df[list(required_charge_cols)].copy()
+    df["order_id"] = df["order_id"].astype(str)
+    df["subscription_id"] = df["subscription_id"].fillna("").astype(str)
+
+    # Only look at multi-charge orders (upsell candidates)
+    order_charge_counts = df.groupby("order_id")["id"].count()
+    multi_order_ids = order_charge_counts[order_charge_counts > 1].index
+    if len(multi_order_ids) == 0:
+        return empty
+
+    multi = df[df["order_id"].isin(multi_order_ids)].copy()
+
+    # Join order total + product to identify the primary charge
+    op = (
+        orders_df[["id", "total", "product_id", "product_name"]]
+        .drop_duplicates("id", keep="last")
+        .rename(columns={"id": "order_id", "product_id": "order_product_id",
+                         "product_name": "order_product_name", "total": "order_total"})
+    )
+    op["order_id"] = op["order_id"].astype(str)
+    multi = multi.merge(op, on="order_id", how="left")
+
+    # Primary charge = closest amount to order total; extras have empty subscription_id
+    multi["dist_to_total"] = (multi["amount"] - multi["order_total"].fillna(0)).abs()
+    primary_ids = (
+        multi.sort_values("dist_to_total")
+        .groupby("order_id")["id"]
+        .first()
+    )
+    extra = multi[
+        ~multi["id"].isin(primary_ids.values) & (multi["subscription_id"] == "")
+    ].copy()
+
+    if extra.empty:
+        return empty
+
+    # Parse timestamps for time-window matching
+    extra["charge_ts"] = pd.to_datetime(extra["created_at"], utc=True, errors="coerce")
+    extra = extra.dropna(subset=["charge_ts"])
+    if extra.empty:
+        return empty
+
+    subs = subscriptions_df[["id", "customer_email", "product_id", "product_name", "price", "created_at"]].copy()
+    subs["sub_ts"] = pd.to_datetime(subs["created_at"], utc=True, errors="coerce")
+    subs = subs.dropna(subset=["sub_ts"]).rename(
+        columns={"id": "sub_id", "product_id": "sub_product_id", "product_name": "sub_product_name"}
+    )
+
+    # Join on customer_email, then filter to ±5-minute window with different product
+    matched = extra.merge(
+        subs[["sub_id", "customer_email", "sub_product_id", "sub_product_name", "price", "sub_ts"]],
+        on="customer_email",
+        how="inner",
+    )
+    matched["time_diff"] = (matched["charge_ts"] - matched["sub_ts"]).dt.total_seconds().abs()
+    matched = matched[
+        (matched["time_diff"] <= 300)
+        & (matched["sub_product_id"] != matched["order_product_id"])
+        & ((matched["amount"] - matched["price"]).abs() < 0.01)  # require exact price match
+    ]
+
+    if matched.empty:
+        return empty
+
+    best = (
+        matched.sort_values(["id", "time_diff"])
+        .groupby("id")
+        .first()
+        .reset_index()[["id", "sub_product_id", "sub_product_name"]]
+        .rename(columns={"sub_product_id": "product_id", "sub_product_name": "product_name"})
+    )
+    return best
+
+
 def enrich_charges_with_product(
     charges_df: pd.DataFrame,
     orders_df: pd.DataFrame,
@@ -642,6 +743,8 @@ def enrich_charges_with_product(
     Add product_id and product_name to charges by joining orders and subscriptions.
 
     Prefers order-derived product info, falls back to subscription-derived.
+    Applies a third-pass correction for upsell charges that SamCart files
+    against the parent order with no dedicated order record.
     """
     df = charges_df.copy()
 
@@ -652,7 +755,6 @@ def enrich_charges_with_product(
             .drop_duplicates("id", keep="last")
             .rename(columns={"id": "order_id", "product_id": "o_product_id", "product_name": "o_product_name"})
         )
-        # Ensure matching dtypes
         df["order_id"] = df["order_id"].astype(str)
         order_products["order_id"] = order_products["order_id"].astype(str)
         df = df.merge(order_products, on="order_id", how="left")
@@ -686,6 +788,18 @@ def enrich_charges_with_product(
     df["product_id"] = df["o_product_id"].fillna(df["s_product_id"])
     df["product_name"] = df["o_product_name"].fillna(df["s_product_name"])
     df = df.drop(columns=["o_product_id", "o_product_name", "s_product_id", "s_product_name"])
+
+    # Third pass: re-attribute upsell charges that SamCart filed against the parent order
+    corrections = _upsell_product_corrections(df, orders_df, subscriptions_df)
+    if not corrections.empty:
+        corrections = corrections.rename(
+            columns={"product_id": "up_product_id", "product_name": "up_product_name"}
+        )
+        df = df.merge(corrections[["id", "up_product_id", "up_product_name"]], on="id", how="left")
+        mask = df["up_product_id"].notna()
+        df.loc[mask, "product_id"] = df.loc[mask, "up_product_id"]
+        df.loc[mask, "product_name"] = df.loc[mask, "up_product_name"]
+        df = df.drop(columns=["up_product_id", "up_product_name"])
 
     return df
 
@@ -746,12 +860,19 @@ def _identify_renewals(
     return result
 
 
-def daily_new_to_file(orders_df: pd.DataFrame) -> pd.DataFrame:
+def daily_new_to_file(
+    orders_df: pd.DataFrame,
+    subscriptions_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     """
     Daily new-to-file customers by product.
 
     A customer is new-to-file on the date of their very first purchase
     across ALL products.
+
+    When subscriptions_df is provided, also counts upsell subscriptions that
+    SamCart creates without a corresponding order (same-day as first order,
+    different product). These are added as supplemental new-to-file entries.
 
     Returns: date, product_id, product_name, new_customer_count
     """
@@ -780,6 +901,38 @@ def daily_new_to_file(orders_df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
         .rename(columns={"customer_email": "new_customer_count"})
     )
+
+    # Supplement with upsell subscriptions that have no matching order
+    if subscriptions_df is not None and not subscriptions_df.empty:
+        sdf = subscriptions_df.copy()
+        sdf["sub_date"] = _to_eastern(sdf["created_at"]).dt.date
+        sdf = sdf.dropna(subset=["sub_date"])
+
+        # Only subscriptions created on a customer's first order date
+        sdf = sdf.merge(first_purchase, on="customer_email", how="inner")
+        sdf = sdf[sdf["sub_date"] == sdf["first_date"]]
+
+        # Exclude products already covered by orders for this customer on this date
+        order_keys = new_customers[["customer_email", "product_id"]].drop_duplicates()
+        order_keys["product_id"] = order_keys["product_id"].astype(str)
+        sdf["product_id"] = sdf["product_id"].astype(str)
+        merged = sdf.merge(order_keys, on=["customer_email", "product_id"], how="left", indicator=True)
+        upsell_subs = merged[merged["_merge"] == "left_only"].copy()
+
+        if not upsell_subs.empty:
+            upsell_counts = (
+                upsell_subs.groupby(["sub_date", "product_id", "product_name"])["customer_email"]
+                .nunique()
+                .reset_index()
+                .rename(columns={"sub_date": "date", "customer_email": "new_customer_count"})
+            )
+            result = pd.concat([result, upsell_counts], ignore_index=True)
+            result = (
+                result.groupby(["date", "product_id", "product_name"])["new_customer_count"]
+                .sum()
+                .reset_index()
+            )
+
     return result
 
 
@@ -928,7 +1081,7 @@ def build_daily_summary(
 
     Returns flat table with all metrics merged on [date, product_id, product_name].
     """
-    ntf = daily_new_to_file(orders_df)
+    ntf = daily_new_to_file(orders_df, subscriptions_df)
     ns = daily_new_sales(charges_df, orders_df, subscriptions_df)
     ref = daily_refunds(charges_df, orders_df, subscriptions_df)
     ren = daily_renewals(charges_df, orders_df, subscriptions_df)
