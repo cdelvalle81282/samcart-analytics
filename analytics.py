@@ -871,19 +871,14 @@ def _identify_renewals(
     return result
 
 
-def daily_new_to_file(
-    orders_df: pd.DataFrame,
-    subscriptions_df: pd.DataFrame | None = None,
-) -> pd.DataFrame:
+def daily_new_to_file(orders_df: pd.DataFrame) -> pd.DataFrame:
     """
     Daily new-to-file customers by product.
 
-    A customer is new-to-file on the date of their very first purchase
-    across ALL products.
-
-    When subscriptions_df is provided, also counts upsell subscriptions that
-    SamCart creates without a corresponding order (same-day as first order,
-    different product). These are added as supplemental new-to-file entries.
+    Each customer is counted exactly once, attributed to the product of their
+    earliest order by timestamp. If a customer makes multiple purchases on the
+    same day (e.g. main product + upsell), only the first-by-timestamp order
+    is counted — the upsell is not a new-customer event.
 
     Returns: date, product_id, product_name, new_customer_count
     """
@@ -899,52 +894,16 @@ def daily_new_to_file(
 
     df["date"] = df["created_at"].dt.date
 
-    # Each customer's first purchase date (across all products)
-    first_purchase = df.groupby("customer_email")["date"].min().reset_index()
-    first_purchase.columns = ["customer_email", "first_date"]
+    # One row per customer: the order with the earliest timestamp
+    first_order_idx = df.groupby("customer_email")["created_at"].idxmin()
+    first_orders = df.loc[first_order_idx]
 
-    df = df.merge(first_purchase, on="customer_email", how="left")
-    new_customers = df[df["date"] == df["first_date"]]
-
-    result = (
-        new_customers.groupby(["date", "product_id", "product_name"])["customer_email"]
+    return (
+        first_orders.groupby(["date", "product_id", "product_name"])["customer_email"]
         .nunique()
         .reset_index()
         .rename(columns={"customer_email": "new_customer_count"})
     )
-
-    # Supplement with upsell subscriptions that have no matching order
-    if subscriptions_df is not None and not subscriptions_df.empty:
-        sdf = subscriptions_df.copy()
-        sdf["sub_date"] = _to_eastern(sdf["created_at"]).dt.date
-        sdf = sdf.dropna(subset=["sub_date"])
-
-        # Only subscriptions created on a customer's first order date
-        sdf = sdf.merge(first_purchase, on="customer_email", how="inner")
-        sdf = sdf[sdf["sub_date"] == sdf["first_date"]]
-
-        # Exclude products already covered by orders for this customer on this date
-        order_keys = new_customers[["customer_email", "product_id"]].drop_duplicates()
-        order_keys["product_id"] = order_keys["product_id"].astype(str)
-        sdf["product_id"] = sdf["product_id"].astype(str)
-        merged = sdf.merge(order_keys, on=["customer_email", "product_id"], how="left", indicator=True)
-        upsell_subs = merged[merged["_merge"] == "left_only"].copy()
-
-        if not upsell_subs.empty:
-            upsell_counts = (
-                upsell_subs.groupby(["sub_date", "product_id", "product_name"])["customer_email"]
-                .nunique()
-                .reset_index()
-                .rename(columns={"sub_date": "date", "customer_email": "new_customer_count"})
-            )
-            result = pd.concat([result, upsell_counts], ignore_index=True)
-            result = (
-                result.groupby(["date", "product_id", "product_name"])["new_customer_count"]
-                .sum()
-                .reset_index()
-            )
-
-    return result
 
 
 def daily_new_sales(
@@ -1091,7 +1050,7 @@ def build_daily_summary(
 
     Returns flat table with all metrics merged on [date, product_id, product_name].
     """
-    ntf = daily_new_to_file(orders_df, subscriptions_df)
+    ntf = daily_new_to_file(orders_df)
     ns = daily_new_sales(charges_df, orders_df, subscriptions_df)
     ref = daily_refunds(charges_df, orders_df, subscriptions_df)
     ren = daily_renewals(charges_df, orders_df, subscriptions_df)
