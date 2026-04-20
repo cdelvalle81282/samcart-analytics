@@ -144,7 +144,7 @@ DAILY_METRICS_METHODOLOGY = """
 **New-to-File Customers**
 - Source: `orders` table
 - Finds each customer's very first purchase date across ALL products
-- On that first purchase date, counts the customer as "new-to-file" for each product they bought
+- Attributes the customer as "new-to-file" to the single product they purchased first (by timestamp on that day)
 - A customer is only new-to-file once, on the day of their first-ever order
 
 **New Sales**

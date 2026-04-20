@@ -180,6 +180,29 @@ class TestTrialAwareRenewalClassification:
         result = _identify_renewals(charges, subs)
         assert not result.iloc[0], "Charge within trial+grace window should not be a renewal"
 
+    def test_subscriptions_without_trial_days_column(self):
+        """Subscriptions frame missing trial_days must not raise KeyError."""
+        charges = pd.DataFrame([
+            _charge(1, "sub1", "a@t.com", 99, None, "2025-03-01T10:05:00Z"),
+        ])
+        # Deliberately omit trial_days from the subscriptions frame
+        subs = pd.DataFrame([{
+            "id": "sub1",
+            "customer_email": "a@t.com",
+            "product_id": "p1",
+            "product_name": "Prod A",
+            "status": "active",
+            "interval": "monthly",
+            "price": 99.0,
+            "created_at": "2025-03-01T10:00:00Z",
+            "canceled_at": None,
+            "next_bill_date": None,
+            "billing_cycle_count": 1,
+            # trial_days intentionally absent
+        }])
+        result = _identify_renewals(charges, subs)
+        assert not result.iloc[0], "Same-day charge without trial_days column should not be a renewal"
+
 
 # ---------------------------------------------------------------------------
 # Finding 4: VIP product filter scopes high_ltv
@@ -225,3 +248,16 @@ class TestVIPProductFilter:
         emails = result["high_ltv"]["customer_email"].tolist()
         assert "alice@t.com" in emails
         assert "bob@t.com" in emails
+
+    def test_product_filter_excludes_other_product_whales_empty_charges(self):
+        """Product filter must scope high_ltv even when charges_df is empty (orders fallback)."""
+        _, orders, subs = self._make_vip_data()
+        empty_charges = pd.DataFrame(
+            columns=["id", "customer_email", "amount", "status",
+                     "refund_amount", "order_id", "subscription_id"]
+        )
+        result = vip_customers(empty_charges, orders, subs, ltv_threshold=4000,
+                               product_filter=["Product A"])
+        emails = result["high_ltv"]["customer_email"].tolist()
+        assert "alice@t.com" in emails, "Alice should be in high_ltv via orders fallback"
+        assert "bob@t.com" not in emails, "Bob (Product B) should be excluded even with empty charges"
