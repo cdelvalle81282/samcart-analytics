@@ -284,17 +284,18 @@ with tab6:
     ltv_start = date_range[0] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else None
     ltv_end = date_range[1] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else None
 
-    _WINDOW_PRESETS = {"30 days": 30, "60 days": 60, "90 days": 90, "180 days": 180, "365 days": 365, "All time": None, "Custom...": "custom"}
+    _CUSTOM_LABEL = "Custom..."
+    _WINDOW_PRESETS: dict[str, int | None] = {"30 days": 30, "60 days": 60, "90 days": 90, "180 days": 180, "365 days": 365, "All time": None}
     _window_label = st.radio(
         "LTV window",
-        options=list(_WINDOW_PRESETS.keys()),
+        options=list(_WINDOW_PRESETS.keys()) + [_CUSTOM_LABEL],
         index=2,
         horizontal=True,
         key="ltv_window_radio",
     )
 
-    _chosen_window: int | None
-    if _window_label == "Custom...":
+    _chosen_window: int | None = None
+    if _window_label == _CUSTOM_LABEL:
         _custom_days = st.number_input(
             "Days",
             min_value=1,
@@ -347,38 +348,41 @@ with tab6:
         )
         render_export_buttons(ltv_df, "entry_product_ltv", key_prefix="entry_ltv")
 
-        # Self-consistency check
-        _audit_raw = ltv_audit_charges(
-            orders_df, charges_df, subs_df,
-            start_date=ltv_start, end_date=ltv_end,
-            ltv_window_days=_chosen_window,
-        )
-        if not _audit_raw.empty:
-            _audit_check = (
-                _audit_raw[_audit_raw["counted_in_window"]]
-                .groupby("entry_product_name")["net_amount"]
-                .agg(["sum", "count"])
-                .reset_index()
-            )
-            _audit_check["computed_avg"] = _audit_check["sum"] / _audit_check["count"]
-            _audit_check = _audit_check.rename(columns={"entry_product_name": "product_name"})
-            _merged_check = ltv_df[["product_name", "avg_ltv", "customer_count"]].merge(
-                _audit_check[["product_name", "computed_avg"]], on="product_name", how="left"
-            )
-            _mismatches = _merged_check[
-                (_merged_check["computed_avg"] - _merged_check["avg_ltv"]).abs() > 0.01
-            ]
-            if not _mismatches.empty:
-                st.warning(
-                    f"Consistency check failed for {len(_mismatches)} product(s): "
-                    + ", ".join(_mismatches["product_name"].tolist())
-                )
-
-        # Audit expander: charge-level detail for manual verification
+        # Audit expander: consistency check + charge-level detail (computed on open only)
         with st.expander("Audit — charge-level detail"):
+            _audit_raw = ltv_audit_charges(
+                orders_df, charges_df, subs_df,
+                start_date=ltv_start, end_date=ltv_end,
+                ltv_window_days=_chosen_window,
+            )
             if _audit_raw.empty:
                 st.info("No charge data available for audit.")
             else:
+                # Consistency check: avg_ltv should equal mean of per-customer windowed spend
+                _per_cust = (
+                    _audit_raw[_audit_raw["counted_in_window"]]
+                    .groupby(["entry_product_name", "customer_email"])["net_amount"]
+                    .sum()
+                    .reset_index()
+                    .groupby("entry_product_name")["net_amount"]
+                    .mean()
+                    .reset_index()
+                    .rename(columns={"entry_product_name": "product_name", "net_amount": "computed_avg"})
+                )
+                _merged_check = ltv_df[["product_name", "avg_ltv"]].merge(
+                    _per_cust, on="product_name", how="left"
+                )
+                _mismatches = _merged_check[
+                    (_merged_check["computed_avg"] - _merged_check["avg_ltv"]).abs() > 0.01
+                ]
+                if not _mismatches.empty:
+                    st.warning(
+                        f"Consistency check failed for {len(_mismatches)} product(s): "
+                        + ", ".join(_mismatches["product_name"].tolist())
+                    )
+                else:
+                    st.success("Consistency check passed — all avg LTV values verified.")
+
                 _audit_products = sorted(_audit_raw["entry_product_name"].dropna().unique().tolist())
                 _audit_product_sel = st.selectbox(
                     "Entry product to inspect",

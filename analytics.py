@@ -647,7 +647,7 @@ def _upsell_product_corrections(
     by the same customer whose price exactly matches the charge amount and whose
     product differs from the order's product.
 
-    Primary charge = the one whose amount is closest to orders.total.
+    Primary charge = the earliest by created_at timestamp.
 
     Returns DataFrame with columns [id, product_id, product_name] for charges
     that should be re-attributed.
@@ -718,7 +718,14 @@ def _upsell_product_corrections(
         columns={"id": "sub_id", "product_id": "sub_product_id", "product_name": "sub_product_name"}
     )
 
-    # Join on customer_email, filter to ±5-minute window with a different product.
+    # Pre-filter subs to a narrow time band before the cross-join to avoid an
+    # O(extra × all_subs_per_customer) intermediate for long-tenured subscribers.
+    ts_min = extra["charge_ts"].min() - pd.Timedelta(seconds=300)
+    ts_max = extra["charge_ts"].max() + pd.Timedelta(seconds=300)
+    subs = subs[(subs["sub_ts"] >= ts_min) & (subs["sub_ts"] <= ts_max)]
+    if subs.empty:
+        return empty
+
     # No price ceiling: upsells can cost more than the initial charge. The 5-minute
     # time window is the primary discriminant; price proximity breaks ties.
     matched = extra.merge(
@@ -894,7 +901,6 @@ def daily_new_to_file(orders_df: pd.DataFrame) -> pd.DataFrame:
 
     df["date"] = df["created_at"].dt.date
 
-    # One row per customer: the order with the earliest timestamp
     first_order_idx = df.groupby("customer_email")["created_at"].idxmin()
     first_orders = df.loc[first_order_idx]
 
@@ -1173,8 +1179,7 @@ def _agg_ltv_for_window(first_orders, charges_with_ts, odf, window_days):
         spend = _customer_net_spend(cdf, odf[odf["customer_email"].isin(fo["customer_email"])])
     else:
         spend = _customer_net_spend(
-            charges_with_ts[charges_with_ts["customer_email"].isin(fo["customer_email"])]
-            if not charges_with_ts.empty else pd.DataFrame(),
+            charges_with_ts[charges_with_ts["customer_email"].isin(fo["customer_email"])],
             odf,
         )
 
@@ -1317,10 +1322,10 @@ def ltv_audit_charges(
     cdf = cdf[cdf["days_since_first"] >= 0]  # charges before first order are noise
 
     cdf["net_amount"] = _net_charge_amount(cdf)
-    cdf["counted_in_window"] = (
-        True if ltv_window_days is None
-        else cdf["days_since_first"] <= ltv_window_days
-    )
+    if ltv_window_days is None:
+        cdf["counted_in_window"] = True
+    else:
+        cdf["counted_in_window"] = cdf["days_since_first"] <= ltv_window_days
 
     cdf = cdf.merge(
         fo[["customer_email", "first_purchase_at", "entry_product_name"]],
@@ -1335,7 +1340,7 @@ def ltv_audit_charges(
         "customer_email", "entry_product_name", "first_purchase_date",
         "id", "charge_date", "days_since_first",
         "amount", "refund_amount", "net_amount", "counted_in_window",
-    ]].rename(columns={"id": "charge_id", "entry_product_name": "entry_product_name"})
+    ]].rename(columns={"id": "charge_id"})
 
     return result.sort_values(
         ["entry_product_name", "customer_email", "charge_date"]
