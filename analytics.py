@@ -1307,6 +1307,74 @@ def ltv_progression_by_entry_product(
     return pd.concat(rows, ignore_index=True)
 
 
+def ltv_audit_charges(
+    orders_df: pd.DataFrame,
+    charges_df: pd.DataFrame,
+    subscriptions_df: pd.DataFrame,
+    start_date=None,
+    end_date=None,
+    ltv_window_days: int | None = None,
+) -> pd.DataFrame:
+    """
+    Charge-level audit data for verifying LTV calculations.
+
+    Returns one row per charge per customer, showing exactly which charges
+    were included in (or excluded from) the LTV window.
+
+    Columns: customer_email, entry_product_name, first_purchase_date,
+             charge_id, charge_date, days_since_first, amount, refund_amount,
+             net_amount, counted_in_window
+    """
+    cols = [
+        "customer_email", "entry_product_name", "first_purchase_date",
+        "charge_id", "charge_date", "days_since_first",
+        "amount", "refund_amount", "net_amount", "counted_in_window",
+    ]
+    first_orders, charges_with_ts, odf = _prepare_ltv_base(orders_df, charges_df, start_date, end_date)
+    if first_orders is None or first_orders.empty:
+        return pd.DataFrame(columns=cols)
+
+    # Optionally exclude immature cohorts (same as the summary view)
+    fo = first_orders.copy()
+    if ltv_window_days is not None:
+        cutoff = pd.Timestamp.now(tz="America/New_York") - pd.Timedelta(days=ltv_window_days)
+        fo = fo[fo["first_purchase_at"] <= cutoff]
+    if fo.empty:
+        return pd.DataFrame(columns=cols)
+
+    if charges_with_ts.empty:
+        return pd.DataFrame(columns=cols)
+
+    # Keep only charges for customers in fo; charges_with_ts already has days_since_first
+    cdf = charges_with_ts[charges_with_ts["customer_email"].isin(fo["customer_email"])].copy()
+    cdf = cdf[cdf["days_since_first"] >= 0]  # charges before first order are noise
+
+    cdf["net_amount"] = _net_charge_amount(cdf)
+    cdf["counted_in_window"] = (
+        True if ltv_window_days is None
+        else cdf["days_since_first"] <= ltv_window_days
+    )
+
+    cdf = cdf.merge(
+        fo[["customer_email", "first_purchase_at", "entry_product_name"]],
+        on="customer_email",
+        how="left",
+    )
+
+    cdf["first_purchase_date"] = cdf["first_purchase_at"].dt.date
+    cdf["charge_date"] = cdf["created_at"].dt.date
+
+    result = cdf[[
+        "customer_email", "entry_product_name", "first_purchase_date",
+        "id", "charge_date", "days_since_first",
+        "amount", "refund_amount", "net_amount", "counted_in_window",
+    ]].rename(columns={"id": "charge_id", "entry_product_name": "entry_product_name"})
+
+    return result.sort_values(
+        ["entry_product_name", "customer_email", "charge_date"]
+    ).reset_index(drop=True)
+
+
 # ------------------------------------------------------------------
 # Shared helpers for new reports
 # ------------------------------------------------------------------

@@ -11,6 +11,7 @@ import streamlit as st
 
 from analytics import (
     build_daily_summary,
+    ltv_audit_charges,
     ltv_progression_by_entry_product,
     new_customer_ltv_by_entry_product,
 )
@@ -283,33 +284,29 @@ with tab6:
     ltv_start = date_range[0] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else None
     ltv_end = date_range[1] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else None
 
-    _ltv_col1, _ltv_col2 = st.columns([3, 1])
-    with _ltv_col1:
-        _window_options = {"30 days": 30, "60 days": 60, "90 days": 90, "180 days": 180, "All time": None}
-        _window_label = st.radio(
-            "LTV window",
-            options=list(_window_options.keys()),
-            index=2,
-            horizontal=True,
-            key="ltv_window_radio",
-        )
-    with _ltv_col2:
+    _WINDOW_PRESETS = {"30 days": 30, "60 days": 60, "90 days": 90, "180 days": 180, "365 days": 365, "All time": None, "Custom...": "custom"}
+    _window_label = st.radio(
+        "LTV window",
+        options=list(_WINDOW_PRESETS.keys()),
+        index=2,
+        horizontal=True,
+        key="ltv_window_radio",
+    )
+
+    _chosen_window: int | None
+    if _window_label == "Custom...":
         _custom_days = st.number_input(
-            "Custom (days)",
+            "Days",
             min_value=1,
             max_value=3650,
             value=90,
             step=30,
             key="ltv_window_custom",
-            help="Enter a custom number of days — overrides the selection above when changed.",
         )
-
-    _chosen_window: int | None
-    if _custom_days != 90 or _window_label == "Custom":
         _chosen_window = int(_custom_days)
         _window_display = f"{_custom_days}-day"
     else:
-        _chosen_window = _window_options[_window_label]
+        _chosen_window = _WINDOW_PRESETS[_window_label]  # type: ignore[assignment]
         _window_display = _window_label if _chosen_window is None else f"{_chosen_window}-day"
 
     ltv_df = new_customer_ltv_by_entry_product(
@@ -349,6 +346,81 @@ with tab6:
             use_container_width=True,
         )
         render_export_buttons(ltv_df, "entry_product_ltv", key_prefix="entry_ltv")
+
+        # Self-consistency check
+        _audit_raw = ltv_audit_charges(
+            orders_df, charges_df, subs_df,
+            start_date=ltv_start, end_date=ltv_end,
+            ltv_window_days=_chosen_window,
+        )
+        if not _audit_raw.empty:
+            _audit_check = (
+                _audit_raw[_audit_raw["counted_in_window"]]
+                .groupby("entry_product_name")["net_amount"]
+                .agg(["sum", "count"])
+                .reset_index()
+            )
+            _audit_check["computed_avg"] = _audit_check["sum"] / _audit_check["count"]
+            _audit_check = _audit_check.rename(columns={"entry_product_name": "product_name"})
+            _merged_check = ltv_df[["product_name", "avg_ltv", "customer_count"]].merge(
+                _audit_check[["product_name", "computed_avg"]], on="product_name", how="left"
+            )
+            _mismatches = _merged_check[
+                (_merged_check["computed_avg"] - _merged_check["avg_ltv"]).abs() > 0.01
+            ]
+            if not _mismatches.empty:
+                st.warning(
+                    f"Consistency check failed for {len(_mismatches)} product(s): "
+                    + ", ".join(_mismatches["product_name"].tolist())
+                )
+
+        # Audit expander: charge-level detail for manual verification
+        with st.expander("Audit — charge-level detail"):
+            if _audit_raw.empty:
+                st.info("No charge data available for audit.")
+            else:
+                _audit_products = sorted(_audit_raw["entry_product_name"].dropna().unique().tolist())
+                _audit_product_sel = st.selectbox(
+                    "Entry product to inspect",
+                    options=_audit_products,
+                    key="ltv_audit_product",
+                )
+                _audit_customer_df = _audit_raw[_audit_raw["entry_product_name"] == _audit_product_sel]
+
+                # Per-customer summary for quick scan
+                _cust_summary = (
+                    _audit_customer_df[_audit_customer_df["counted_in_window"]]
+                    .groupby("customer_email")["net_amount"]
+                    .sum()
+                    .reset_index()
+                    .rename(columns={"net_amount": "ltv_in_window"})
+                    .sort_values("ltv_in_window", ascending=False)
+                )
+                st.caption(
+                    f"{len(_cust_summary)} customers — avg LTV: "
+                    f"${_cust_summary['ltv_in_window'].mean():.2f}"
+                )
+                _inspect_email = st.selectbox(
+                    "Customer to inspect",
+                    options=_cust_summary["customer_email"].tolist(),
+                    key="ltv_audit_customer",
+                )
+
+                # Full charge history for that customer
+                _cust_charges = _audit_customer_df[
+                    _audit_customer_df["customer_email"] == _inspect_email
+                ].copy()
+                st.dataframe(
+                    _cust_charges,
+                    column_config={
+                        "amount": st.column_config.NumberColumn("Amount", format="$%.2f"),
+                        "refund_amount": st.column_config.NumberColumn("Refund", format="$%.2f"),
+                        "net_amount": st.column_config.NumberColumn("Net", format="$%.2f"),
+                        "counted_in_window": st.column_config.CheckboxColumn("In Window"),
+                    },
+                    use_container_width=True,
+                )
+                render_export_buttons(_audit_raw, "ltv_audit", key_prefix="ltv_audit")
     else:
         st.info(
             "No LTV data available."
