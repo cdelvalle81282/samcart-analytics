@@ -656,13 +656,24 @@ def _upsell_product_corrections(
     if charges_df.empty or orders_df.empty or subscriptions_df.empty:
         return empty
 
-    required_charge_cols = {"id", "order_id", "subscription_id", "customer_email", "amount", "created_at"}
+    required_charge_cols = {"id", "order_id", "subscription_id", "customer_email", "amount", "created_at", "status"}
     if not required_charge_cols.issubset(charges_df.columns):
         return empty
 
     df = charges_df[list(required_charge_cols)].copy()
-    df["order_id"] = df["order_id"].astype(str)
+    # Filter to money-collecting charges only — failed/pending charges must not
+    # be treated as primary, which would misidentify successful charges as upsells.
+    df = df[_is_collected_charge(df["status"])].copy()
+    if df.empty:
+        return empty
+
+    df["order_id"] = df["order_id"].astype(str).str.strip()
     df["subscription_id"] = df["subscription_id"].fillna("").astype(str)
+    # Drop rows with no valid order_id — null order_ids stringify to "nan"/"None"
+    # and would group unrelated charges together.
+    df = df[~df["order_id"].isin(["", "nan", "None", "none"])]
+    if df.empty:
+        return empty
 
     # Only look at multi-charge orders (upsell candidates)
     order_charge_counts = df.groupby("order_id")["id"].count()
@@ -829,8 +840,10 @@ def _identify_renewals(
 
     if has_sub.any():
         sub_charges = charges_df.loc[has_sub].copy()
-        sub_charges["_charge_dt"] = pd.to_datetime(sub_charges["created_at"], errors="coerce")
-        sub_charges["rank"] = sub_charges.groupby("subscription_id")["_charge_dt"].rank(method="first")
+        sub_charges["_charge_dt"] = pd.to_datetime(sub_charges["created_at"], errors="coerce", utc=True)
+        # Sort deterministically before ranking so identical timestamps don't flap
+        sub_charges = sub_charges.sort_values(["subscription_id", "_charge_dt", "id"])
+        sub_charges["rank"] = sub_charges.groupby("subscription_id")["_charge_dt"].rank(method="min", ascending=True)
         is_ranked_renewal = sub_charges["rank"] > 1
 
         # For rank-1 charges, check if the subscription predates the charge
@@ -848,12 +861,8 @@ def _identify_renewals(
                 rank1["subscription_id"] = rank1["subscription_id"].astype(str)
                 rank1 = rank1.merge(sub_dates, on="subscription_id", how="left")
                 rank1["_sub_created_dt"] = pd.to_datetime(rank1["_sub_created"], errors="coerce", utc=True)
-                charge_dt = rank1["_charge_dt"]
-                if charge_dt.dt.tz is None:
-                    charge_dt = charge_dt.dt.tz_localize("UTC")
-                else:
-                    charge_dt = charge_dt.dt.tz_convert("UTC")
-                age = charge_dt - rank1["_sub_created_dt"]
+                # Both series are now UTC-aware (charge_dt parsed with utc=True above)
+                age = rank1["_charge_dt"] - rank1["_sub_created_dt"]
                 old_sub_idx = rank1.loc[age > pd.Timedelta(hours=48), "_orig_idx"]
                 is_ranked_renewal.loc[old_sub_idx] = True
 
@@ -1006,11 +1015,10 @@ def daily_refunds(
 
     # Prefer refund_date for the date axis; fall back to created_at
     if "refund_date" in df.columns and df["refund_date"].notna().any():
-        df["_event_date"] = pd.to_datetime(df["refund_date"], errors="coerce", utc=True)
-        # Fall back to created_at where refund_date is missing
-        fallback = _to_eastern(df["created_at"])
-        df["_event_date"] = df["_event_date"].fillna(fallback)
-        df["_event_date"] = df["_event_date"].dt.tz_convert(ET)
+        # Convert both to ET before fillna to avoid mixed-tz Series issues
+        refund_et = pd.to_datetime(df["refund_date"], errors="coerce", utc=True).dt.tz_convert(ET)
+        fallback_et = _to_eastern(df["created_at"])
+        df["_event_date"] = refund_et.fillna(fallback_et)
     else:
         df["_event_date"] = _to_eastern(df["created_at"])
 
