@@ -530,6 +530,62 @@ class SamCartCache:
             progress.progress(1.0, text="Sync complete!")
         return total_records
 
+    def sync_today(self, client: SamCartClient, headless: bool = False) -> int:
+        """
+        Quick sync of today's activity only — new orders and charges since
+        midnight Eastern. Intended for intraday use so you can see sales as
+        they happen without waiting for the overnight full sync.
+
+        Does NOT update subscription statuses, historical refunds, or products.
+        Use sync_all for a complete refresh.
+        """
+        from zoneinfo import ZoneInfo
+        from datetime import date, time as dt_time
+
+        ET = ZoneInfo("America/New_York")
+        midnight_et = datetime.combine(date.today(), dt_time.min, tzinfo=ET)
+        since = midnight_et.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        total_records = 0
+        if headless:
+            print(f"Today's sync (since {midnight_et.strftime('%Y-%m-%d %H:%M %Z')})...")
+        else:
+            progress = st.progress(0, text="Syncing today's customers...")
+
+        def _timed(label, pct, sync_fn):
+            nonlocal total_records
+            if not headless:
+                progress.progress(pct, text=f"Syncing today's {label}...")
+            recs = sync_fn()
+            if headless:
+                print(f"  {label}: {len(recs)} records")
+            total_records += len(recs)
+
+        # Customers first to build id->email map for new buyers
+        _timed("customers", 0.1, lambda: self._sync_table(
+            "customers", client.get_customers, self._upsert_customers,
+            since=since, headless=headless,
+        ))
+        customer_map = self._build_customer_map()
+
+        # Today's orders
+        _timed("orders", 0.5, lambda: self._sync_table(
+            "orders", client.get_orders, self._upsert_orders,
+            since=since, customer_map=customer_map, headless=headless,
+        ))
+
+        # Today's charges
+        _timed("charges", 0.85, lambda: self._sync_table(
+            "charges", client.get_charges, self._upsert_charges,
+            since=since, customer_map=customer_map, headless=headless,
+        ))
+
+        if headless:
+            print(f"Today's sync complete: {total_records} records")
+        else:
+            progress.progress(1.0, text="Today's sync complete!")
+        return total_records
+
     # ------------------------------------------------------------------
     # Query helpers — return DataFrames
     # ------------------------------------------------------------------

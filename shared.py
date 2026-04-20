@@ -61,25 +61,53 @@ def render_sync_sidebar() -> None:
         st.sidebar.markdown("---")
         st.sidebar.subheader("Data Sync")
 
-        force_full = st.sidebar.checkbox("Force full resync", value=False)
-        sync_btn = st.sidebar.button(
-            "Sync Data",
-            disabled=st.session_state.get("sync_running", False),
+        _busy = st.session_state.get("sync_running", False)
+
+        today_btn = st.sidebar.button(
+            "Sync Today's Data",
+            disabled=_busy,
             use_container_width=True,
+            help="Fetches today's new orders and charges only (fast). Does not update subscription statuses or historical refunds.",
+        )
+        st.sidebar.caption("Captures new sales up to right now. Run anytime during the day.")
+
+        st.sidebar.markdown("")
+        force_full = st.sidebar.checkbox("Force full resync", value=False)
+        full_btn = st.sidebar.button(
+            "Full Sync",
+            disabled=_busy,
+            use_container_width=True,
+            help="Full sync of all tables including subscription statuses and refunds. Runs automatically at midnight EST.",
         )
 
-        if sync_btn:
+        if today_btn:
+            st.session_state.sync_running = True
+            try:
+                with st.sidebar:
+                    total = cache.sync_today(client)
+                    st.success(f"Today's sync complete — {total:,} records")
+                    st.cache_data.clear()
+            except SamCartAPIError:
+                logger.exception("SamCart API error during today sync")
+                st.sidebar.error("Sync failed due to an API error.")
+            except Exception:
+                logger.exception("Unexpected error during today sync")
+                st.sidebar.error("Sync failed unexpectedly.")
+            finally:
+                st.session_state.sync_running = False
+
+        if full_btn:
             st.session_state.sync_running = True
             try:
                 with st.sidebar:
                     total = cache.sync_all(client, force_full=force_full)
-                    st.success(f"Synced {total:,} records")
+                    st.success(f"Full sync complete — {total:,} records")
                     st.cache_data.clear()
             except SamCartAPIError:
-                logger.exception("SamCart API error during sync")
+                logger.exception("SamCart API error during full sync")
                 st.sidebar.error("Sync failed due to an API error.")
             except Exception:
-                logger.exception("Unexpected error during sync")
+                logger.exception("Unexpected error during full sync")
                 st.sidebar.error("Sync failed unexpectedly.")
             finally:
                 st.session_state.sync_running = False
