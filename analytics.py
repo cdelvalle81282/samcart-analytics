@@ -682,10 +682,11 @@ def _upsell_product_corrections(
     op["order_id"] = op["order_id"].astype(str)
     multi = multi.merge(op, on="order_id", how="left")
 
-    # Primary charge = closest amount to order total; extras have empty subscription_id
-    multi["dist_to_total"] = (multi["amount"] - multi["order_total"].fillna(0)).abs()
+    # Primary charge = earliest by created_at. Upsells always follow the initial charge.
+    multi["charge_ts"] = pd.to_datetime(multi["created_at"], utc=True, errors="coerce")
     primary_ids = (
-        multi.sort_values("dist_to_total")
+        multi.dropna(subset=["charge_ts"])
+        .sort_values("charge_ts")
         .groupby("order_id")["id"]
         .first()
     )
@@ -696,8 +697,6 @@ def _upsell_product_corrections(
     if extra.empty:
         return empty
 
-    # Parse timestamps for time-window matching
-    extra["charge_ts"] = pd.to_datetime(extra["created_at"], utc=True, errors="coerce")
     extra = extra.dropna(subset=["charge_ts"])
     if extra.empty:
         return empty
@@ -708,20 +707,18 @@ def _upsell_product_corrections(
         columns={"id": "sub_id", "product_id": "sub_product_id", "product_name": "sub_product_name"}
     )
 
-    # Join on customer_email, then filter to ±5-minute window with different product
+    # Join on customer_email, filter to ±5-minute window with a different product.
+    # No price ceiling: upsells can cost more than the initial charge. The 5-minute
+    # time window is the primary discriminant; price proximity breaks ties.
     matched = extra.merge(
         subs[["sub_id", "customer_email", "sub_product_id", "sub_product_name", "price", "sub_ts"]],
         on="customer_email",
         how="inner",
     )
     matched["time_diff"] = (matched["charge_ts"] - matched["sub_ts"]).dt.total_seconds().abs()
-    # Accept: exact price, discounted price (trial/promo), or minor rounding (≤5% above).
-    # Charge should never significantly exceed the subscription's regular price.
-    matched["price_ratio"] = matched["amount"] / matched["price"].replace(0, float("nan"))
     matched = matched[
         (matched["time_diff"] <= 300)
         & (matched["sub_product_id"] != matched["order_product_id"])
-        & (matched["price_ratio"] <= 1.05)  # at or below regular price (discounts/trials ok)
     ]
 
     if matched.empty:
