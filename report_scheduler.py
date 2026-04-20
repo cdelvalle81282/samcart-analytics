@@ -104,7 +104,11 @@ class ReportScheduler:
         raw_extra = report.get("extra_params")
         if raw_extra:
             try:
-                extra_params = json.loads(raw_extra)
+                parsed = json.loads(raw_extra)
+                # Whitelist allowed keys to prevent kwarg injection into report generators
+                _allowed = {"interval_filter", "product_id", "min_orders", "segment_filter",
+                            "ltv_threshold", "min_billing_cycles"}
+                extra_params = {k: v for k, v in parsed.items() if k in _allowed}
             except (json.JSONDecodeError, TypeError):
                 extra_params = {}
 

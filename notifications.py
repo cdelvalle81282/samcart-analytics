@@ -68,6 +68,11 @@ def format_daily_report(summary_df: pd.DataFrame, manager: ManagerConfig) -> str
     return html
 
 
+def _slack_escape(text: str) -> str:
+    """Escape Slack mrkdwn special characters to prevent link/markup injection."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def send_slack_report(
     webhook_url: str,
     report_name: str,
@@ -85,7 +90,7 @@ def send_slack_report(
 
     # Build Slack blocks
     blocks: list[dict] = [
-        {"type": "header", "text": {"type": "plain_text", "text": report_name}},
+        {"type": "header", "text": {"type": "plain_text", "text": _slack_escape(report_name)}},
         {"type": "divider"},
     ]
 
@@ -145,8 +150,8 @@ def send_slack_sheet_link(
 ) -> bool:
     """Post a Google Sheets link to Slack via incoming webhook."""
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": f"Report: {report_name}"}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"<{sheet_url}|Open in Google Sheets>"}},
+        {"type": "header", "text": {"type": "plain_text", "text": f"Report: {_slack_escape(report_name)}"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"<{_slack_escape(sheet_url)}|Open in Google Sheets>"}},
     ]
     try:
         resp = requests.post(webhook_url, json={"blocks": blocks}, timeout=10)
@@ -169,15 +174,15 @@ def send_slack_dm(
         return False
 
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": f"Report: {report_name}"}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"<{sheet_url}|Open in Google Sheets>"}},
+        {"type": "header", "text": {"type": "plain_text", "text": f"Report: {_slack_escape(report_name)}"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"<{_slack_escape(sheet_url)}|Open in Google Sheets>"}},
     ]
 
     try:
         resp = requests.post(
             "https://slack.com/api/chat.postMessage",
             headers={"Authorization": f"Bearer {bot_token}"},
-            json={"channel": user_id, "blocks": blocks, "text": f"Report: {report_name}"},
+            json={"channel": user_id, "blocks": blocks, "text": f"Report: {_slack_escape(report_name)}"},
             timeout=10,
         )
         resp.raise_for_status()

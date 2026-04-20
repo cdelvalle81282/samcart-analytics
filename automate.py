@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 from zoneinfo import ZoneInfo
 
 import streamlit as st
 
 from auth import get_auth_db, has_permission
 from shared import get_scheduler
+
+logger = logging.getLogger(__name__)
 
 _COMMON_TIMEZONES = [
     "America/Los_Angeles",
@@ -173,5 +176,6 @@ def render_automate_button(
                     f"'{report_name.strip()}' scheduled. "
                     "Manage it in **User Management → Scheduled Reports**."
                 )
-            except Exception as exc:
-                st.error(f"Failed to create report: {exc}")
+            except Exception:
+                logger.exception("Failed to create scheduled report")
+                st.error("Failed to create report. Please try again or contact your administrator.")

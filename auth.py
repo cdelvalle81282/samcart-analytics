@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 
 import streamlit as st
 
 from auth_db import AuthDB
+
+_SESSION_MAX_HOURS = 12
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +47,7 @@ def _migrate_from_secrets(db: AuthDB) -> None:
     for username, user_data in creds.items():
         role = user_data.get("role", "viewer")
         # Map old roles to new system
-        if role in ("admin", "super_admin"):
+        if role == "super_admin":
             db_role = "super_admin"
         elif role == "admin":
             db_role = "admin"
@@ -91,7 +94,14 @@ def require_auth() -> None:
 
     # ── Already authenticated ──────────────────────────────────────────
     if st.session_state.get("authentication_status") is True:
-        # Render logout button in sidebar
+        # Enforce absolute session expiry
+        login_at_str = st.session_state.get("login_at")
+        if login_at_str:
+            age = datetime.utcnow() - datetime.fromisoformat(login_at_str)
+            if age > timedelta(hours=_SESSION_MAX_HOURS):
+                _logout()
+                st.warning("Your session has expired. Please log in again.")
+                st.stop()
         with st.sidebar:
             if st.button("Logout"):
                 _logout()
@@ -116,12 +126,11 @@ def require_auth() -> None:
     if submitted:
         user = auth_db.authenticate(username, password)
         if user is not None:
-            # Set session state for authenticated user
             st.session_state["authentication_status"] = True
             st.session_state["username"] = user["username"]
             st.session_state["name"] = user["username"]
+            st.session_state["login_at"] = datetime.utcnow().isoformat()
 
-            # Load permissions
             try:
                 st.session_state["permissions"] = auth_db.get_permissions(user["username"])
                 st.session_state["user_role"] = user["role"]

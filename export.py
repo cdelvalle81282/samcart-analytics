@@ -13,6 +13,18 @@ EXPORTS_DIR = Path("exports")
 PII_COLUMNS = {"phone", "billing_city", "billing_state", "billing_country", "email", "customer_email", "first_name", "last_name"}
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _sanitize_formula_cells(df: pd.DataFrame) -> pd.DataFrame:
+    """Prefix cells that start with formula-trigger characters to prevent CSV/Excel injection."""
+    def _safe(val):
+        if isinstance(val, str) and val.startswith(_FORMULA_PREFIXES):
+            return "'" + val
+        return val
+    return df.apply(lambda col: col.map(_safe) if col.dtype == object else col)
+
+
 def _strip_pii(df: pd.DataFrame, include_pii: bool) -> pd.DataFrame:
     """Remove PII columns if include_pii is False."""
     if include_pii:
@@ -22,6 +34,7 @@ def _strip_pii(df: pd.DataFrame, include_pii: bool) -> pd.DataFrame:
 
 
 def export_to_excel(df: pd.DataFrame, sheet_name: str = "Data", include_pii: bool = False) -> bytes:
+    df = _sanitize_formula_cells(df)
     """
     Format DataFrame as Excel bytes for st.download_button.
 
@@ -56,6 +69,7 @@ def export_to_excel(df: pd.DataFrame, sheet_name: str = "Data", include_pii: boo
 def export_to_csv(df: pd.DataFrame, include_pii: bool = False) -> bytes:
     """Format DataFrame as CSV bytes for st.download_button."""
     df = _strip_pii(df, include_pii)
+    df = _sanitize_formula_cells(df)
     return df.to_csv(index=False).encode("utf-8")
 
 

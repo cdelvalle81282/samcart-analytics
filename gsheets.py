@@ -80,7 +80,7 @@ def upload_daily_summary(summary_df: pd.DataFrame, spreadsheet_id: str) -> None:
     worksheet.clear()
     worksheet.update(
         [upload_df.columns.tolist()] + upload_df.values.tolist(),
-        value_input_option="USER_ENTERED",
+        value_input_option="RAW",
     )
 
 
@@ -118,7 +118,7 @@ def upload_report(
     worksheet.clear()
     worksheet.update(
         [upload_df.columns.tolist()] + upload_df.values.tolist(),
-        value_input_option="USER_ENTERED",
+        value_input_option="RAW",
     )
 
     return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"

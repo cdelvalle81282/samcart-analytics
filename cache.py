@@ -608,7 +608,7 @@ class SamCartCache:
 
     def search_customers(self, query: str) -> pd.DataFrame:
         """Search customers by email or name. Uses parameterized LIKE with escaped wildcards."""
-        if len(query) > 100:
+        if len(query) < 3 or len(query) > 100:
             return pd.DataFrame()
         # Escape LIKE wildcards so they are treated as literals
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

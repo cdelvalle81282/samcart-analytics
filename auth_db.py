@@ -129,7 +129,13 @@ class AuthDB:
         try:
             cur.execute("ALTER TABLE users ADD COLUMN slack_user_id TEXT")
         except sqlite3.OperationalError:
-            pass  # column already exists
+            pass
+        for _col in ["failed_login_attempts INTEGER DEFAULT 0",
+                     "locked_until TEXT"]:
+            try:
+                cur.execute(f"ALTER TABLE users ADD COLUMN {_col}")
+            except sqlite3.OperationalError:
+                pass
 
         # Migration: add new schedule columns
         for col in [
@@ -345,19 +351,55 @@ class AuthDB:
         )
         self.conn.commit()
 
+    _MAX_FAILED_ATTEMPTS = 5
+    _LOCKOUT_MINUTES = 15
+
     def authenticate(self, username: str, password: str) -> dict | None:
-        """Verify credentials. Return user dict if active and valid, else None."""
+        """Verify credentials with rate limiting. Returns user dict or None."""
+        from datetime import datetime, timedelta, timezone
+
         row = self.conn.execute(
             "SELECT id, username, email, password_hash, role, is_active, "
-            "created_by, created_at FROM users WHERE username = ?",
+            "created_by, created_at, failed_login_attempts, locked_until "
+            "FROM users WHERE username = ?",
             (username,),
         ).fetchone()
         if row is None:
             return None
         if not row["is_active"]:
             return None
+
+        # Check lockout
+        locked_until = row["locked_until"]
+        if locked_until:
+            lock_dt = datetime.fromisoformat(locked_until).replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) < lock_dt:
+                return None  # Still locked — don't reveal why
+
         if not self._verify_password(password, row["password_hash"]):
+            attempts = (row["failed_login_attempts"] or 0) + 1
+            if attempts >= self._MAX_FAILED_ATTEMPTS:
+                lock_until = (
+                    datetime.now(timezone.utc) + timedelta(minutes=self._LOCKOUT_MINUTES)
+                ).isoformat()
+                self.conn.execute(
+                    "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
+                    (attempts, lock_until, row["id"]),
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE users SET failed_login_attempts = ? WHERE id = ?",
+                    (attempts, row["id"]),
+                )
+            self.conn.commit()
             return None
+
+        # Success — reset counter
+        self.conn.execute(
+            "UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?",
+            (row["id"],),
+        )
+        self.conn.commit()
         return self._row_to_user_dict(row)
 
     # ── Permissions ──────────────────────────────────────────────────────
