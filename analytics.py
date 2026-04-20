@@ -715,17 +715,22 @@ def _upsell_product_corrections(
         how="inner",
     )
     matched["time_diff"] = (matched["charge_ts"] - matched["sub_ts"]).dt.total_seconds().abs()
+    # Accept: exact price, discounted price (trial/promo), or minor rounding (≤5% above).
+    # Charge should never significantly exceed the subscription's regular price.
+    matched["price_ratio"] = matched["amount"] / matched["price"].replace(0, float("nan"))
     matched = matched[
         (matched["time_diff"] <= 300)
         & (matched["sub_product_id"] != matched["order_product_id"])
-        & ((matched["amount"] - matched["price"]).abs() < 0.01)  # require exact price match
+        & (matched["price_ratio"] <= 1.05)  # at or below regular price (discounts/trials ok)
     ]
 
     if matched.empty:
         return empty
 
+    # Among candidates per charge, prefer closest price then closest time
+    matched["price_diff"] = (matched["amount"] - matched["price"]).abs()
     best = (
-        matched.sort_values(["id", "time_diff"])
+        matched.sort_values(["id", "price_diff", "time_diff"])
         .groupby("id")
         .first()
         .reset_index()[["id", "sub_product_id", "sub_product_name"]]
