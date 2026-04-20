@@ -1327,8 +1327,10 @@ def ltv_audit_charges(
     else:
         cdf["counted_in_window"] = cdf["days_since_first"] <= ltv_window_days
 
+    # charges_with_ts already has first_purchase_at from _prepare_ltv_base;
+    # only merge entry_product_name which isn't in the base charges.
     cdf = cdf.merge(
-        fo[["customer_email", "first_purchase_at", "entry_product_name"]],
+        fo[["customer_email", "entry_product_name"]],
         on="customer_email",
         how="left",
     )
