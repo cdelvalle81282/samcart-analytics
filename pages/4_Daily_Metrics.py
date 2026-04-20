@@ -101,7 +101,7 @@ if filtered.empty:
 # ------------------------------------------------------------------
 
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("Total New Customers", f"{int(filtered['new_customer_count'].sum()):,}", help="Unique new-to-file customers across selected products (a customer buying multiple products on day 1 is counted once per product)")
+m1.metric("Total New Customers", f"{int(filtered['new_customer_count'].sum()):,}", help="Unique new-to-file customers. Each customer is counted once, attributed to the first product they purchased (by timestamp).")
 m2.metric("Total New Sales", f"{int(filtered['sale_count'].sum()):,}")
 m3.metric("Total Refunds", f"{int(filtered['refund_count'].sum()):,}")
 m4.metric("Total Renewals", f"{int(filtered['renewal_count'].sum()):,}")

@@ -270,7 +270,9 @@ def build_cohort_performance(
         return empty_activity, empty_renewal, empty_stick
 
     # --- 5. Classify charges ---
-    df["is_successful"] = _is_successful_charge(df["status"])
+    # Use _is_collected_charge (includes partially_refunded) so customers whose
+    # only charge is a partial refund still count as active with net revenue.
+    df["is_successful"] = _is_collected_charge(df["status"])
     df["is_refund"] = _is_refund_charge(df["status"])
 
     # --- 6. Rank charges per subscription by created_at ascending ---
@@ -424,8 +426,8 @@ def build_cohort_heatmap(
     if df.empty:
         return pd.DataFrame()
 
-    # --- 5. Classify successful charges ---
-    df["is_successful"] = _is_successful_charge(df["status"])
+    # --- 5. Classify charges — include partially_refunded so those subs count as retained ---
+    df["is_successful"] = _is_collected_charge(df["status"])
 
     # --- 6. Parse dates and drop NaT ---
     df["created_at_ts"] = pd.to_datetime(df["created_at"], utc=True, errors="coerce")
@@ -850,17 +852,21 @@ def _identify_renewals(
         sub_charges["_charge_dt"] = pd.to_datetime(sub_charges["created_at"], errors="coerce", utc=True)
         # Sort deterministically before ranking so identical timestamps don't flap
         sub_charges = sub_charges.sort_values(["subscription_id", "_charge_dt", "id"])
-        sub_charges["rank"] = sub_charges.groupby("subscription_id")["_charge_dt"].rank(method="min", ascending=True)
+        # cumcount gives a positional rank (0-based) so tied timestamps don't both get rank 1
+        sub_charges["rank"] = sub_charges.groupby("subscription_id").cumcount() + 1
         is_ranked_renewal = sub_charges["rank"] > 1
 
-        # For rank-1 charges, check if the subscription predates the charge
+        # For rank-1 charges, check if the subscription predates the charge by more than
+        # its trial window + a grace period. This catches cases where charge history is
+        # incomplete (DB-earliest charge is not truly the first), while correctly treating
+        # legitimate delayed first bills (free trials) as new purchases.
         if subscriptions_df is not None and not subscriptions_df.empty:
             rank1_mask = sub_charges["rank"] == 1
             if rank1_mask.any():
                 rank1 = sub_charges.loc[rank1_mask].copy()
                 rank1["_orig_idx"] = rank1.index
                 sub_dates = (
-                    subscriptions_df[["id", "created_at"]]
+                    subscriptions_df[["id", "created_at", "trial_days"]]
                     .drop_duplicates("id", keep="last")
                     .rename(columns={"id": "subscription_id", "created_at": "_sub_created"})
                 )
@@ -868,9 +874,15 @@ def _identify_renewals(
                 rank1["subscription_id"] = rank1["subscription_id"].astype(str)
                 rank1 = rank1.merge(sub_dates, on="subscription_id", how="left")
                 rank1["_sub_created_dt"] = pd.to_datetime(rank1["_sub_created"], errors="coerce", utc=True)
-                # Both series are now UTC-aware (charge_dt parsed with utc=True above)
+                # Per-subscription threshold: trial_days + 7-day grace, floored at 48 hours.
+                # A charge is a renewal iff it arrived later than the subscription's natural
+                # first-bill window — indicating the true first charge was missed in sync.
+                trial_td = pd.to_timedelta(
+                    pd.to_numeric(rank1["trial_days"], errors="coerce").fillna(0), unit="D"
+                )
+                threshold = (trial_td + pd.Timedelta(days=7)).clip(lower=pd.Timedelta(hours=48))
                 age = rank1["_charge_dt"] - rank1["_sub_created_dt"]
-                old_sub_idx = rank1.loc[age > pd.Timedelta(hours=48), "_orig_idx"]
+                old_sub_idx = rank1.loc[age > threshold, "_orig_idx"]
                 is_ranked_renewal.loc[old_sub_idx] = True
 
         result.loc[sub_charges.index] = is_ranked_renewal
@@ -2336,12 +2348,22 @@ def vip_customers(
     """
     Identify VIP customers by high LTV or subscription loyalty.
 
-    Returns dict with:
-    - 'high_ltv': customers with net lifetime spend >= ltv_threshold
-    - 'loyal_subscribers': active subscribers with >= min_billing_cycles
+    When product_filter is supplied, both outputs are scoped to those products:
+    - 'high_ltv': customers whose spend on the filtered product(s) >= ltv_threshold
+    - 'loyal_subscribers': active subscribers on the filtered product(s)
+
+    Returns dict with keys 'high_ltv' and 'loyal_subscribers'.
     """
     # --- High LTV ---
-    spend = _customer_net_spend(charges_df, orders_df)
+    # Scope charges (and orders fallback) to the selected products so high-LTV
+    # from unrelated products doesn't bleed into a product-filtered report.
+    if product_filter and not charges_df.empty:
+        enriched = enrich_charges_with_product(charges_df, orders_df, subscriptions_df)
+        filtered_charges = enriched[enriched["product_name"].isin(product_filter)]
+        filtered_orders = orders_df[orders_df["product_name"].isin(product_filter)] if not orders_df.empty else orders_df
+        spend = _customer_net_spend(filtered_charges, filtered_orders)
+    else:
+        spend = _customer_net_spend(charges_df, orders_df)
     high_ltv = spend[spend["total_spend"] >= ltv_threshold].copy()
     high_ltv = high_ltv.sort_values("total_spend", ascending=False)
 
