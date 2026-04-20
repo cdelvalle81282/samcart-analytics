@@ -865,16 +865,15 @@ def _identify_renewals(
             if rank1_mask.any():
                 rank1 = sub_charges.loc[rank1_mask].copy()
                 rank1["_orig_idx"] = rank1.index
-                _trial_cols = ["id", "created_at"] + (
-                    ["trial_days"] if "trial_days" in subscriptions_df.columns else []
-                )
                 sub_dates = (
-                    subscriptions_df[_trial_cols]
+                    subscriptions_df[["id", "created_at"]]
                     .drop_duplicates("id", keep="last")
                     .rename(columns={"id": "subscription_id", "created_at": "_sub_created"})
                 )
-                if "trial_days" not in sub_dates.columns:
-                    sub_dates["trial_days"] = 0
+                sub_dates["trial_days"] = (
+                    subscriptions_df["trial_days"].values
+                    if "trial_days" in subscriptions_df.columns else 0
+                )
                 sub_dates["subscription_id"] = sub_dates["subscription_id"].astype(str)
                 rank1["subscription_id"] = rank1["subscription_id"].astype(str)
                 rank1 = rank1.merge(sub_dates, on="subscription_id", how="left")
@@ -2363,10 +2362,7 @@ def vip_customers(
     # Scope charges (and orders fallback) to the selected products so high-LTV
     # from unrelated products doesn't bleed into a product-filtered report.
     if product_filter:
-        filtered_orders = (
-            orders_df[orders_df["product_name"].isin(product_filter)]
-            if not orders_df.empty else orders_df
-        )
+        filtered_orders = orders_df[orders_df["product_name"].isin(product_filter)]
         if not charges_df.empty:
             enriched = enrich_charges_with_product(charges_df, orders_df, subscriptions_df)
             filtered_charges = enriched[enriched["product_name"].isin(product_filter)]

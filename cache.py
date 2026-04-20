@@ -4,7 +4,8 @@ import os
 import sqlite3
 import stat
 import time as _time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time as _dt_time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -464,12 +465,12 @@ class SamCartCache:
             progress = st.progress(0, text="Starting sync...")
         total_records = 0
 
-        def _timed_sync(label, pct, sync_fn):
+        def _timed_sync(label, pct, sync_fn, prefix="Syncing"):
             nonlocal total_records
             if headless:
-                print(f"Syncing {label}...")
+                print(f"{prefix} {label}...")
             else:
-                progress.progress(pct, text=f"Syncing {label}...")
+                progress.progress(pct, text=f"{prefix} {label}...")
             t0 = _time.time()
             recs = sync_fn()
             elapsed = _time.time() - t0
@@ -539,12 +540,11 @@ class SamCartCache:
         Does NOT update subscription statuses, historical refunds, or products.
         Use sync_all for a complete refresh.
         """
-        from zoneinfo import ZoneInfo
-        from datetime import date, time as dt_time
-
-        ET = ZoneInfo("America/New_York")
-        midnight_et = datetime.combine(date.today(), dt_time.min, tzinfo=ET)
-        since = midnight_et.strftime("%Y-%m-%dT%H:%M:%SZ")
+        _ET = ZoneInfo("America/New_York")
+        midnight_et = datetime.combine(date.today(), _dt_time.min, tzinfo=_ET)
+        # Convert to UTC before formatting — strftime on an ET-aware datetime
+        # produces the correct wall-clock digits but the Z suffix would lie to the API.
+        since = midnight_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         total_records = 0
         if headless:
@@ -552,30 +552,31 @@ class SamCartCache:
         else:
             progress = st.progress(0, text="Syncing today's customers...")
 
-        def _timed(label, pct, sync_fn):
+        def _timed_today(label, pct, sync_fn):
             nonlocal total_records
-            if not headless:
-                progress.progress(pct, text=f"Syncing today's {label}...")
-            recs = sync_fn()
             if headless:
-                print(f"  {label}: {len(recs)} records")
+                print(f"Syncing today's {label}...")
+            else:
+                progress.progress(pct, text=f"Syncing today's {label}...")
+            t0 = _time.time()
+            recs = sync_fn()
+            elapsed = _time.time() - t0
+            if headless:
+                print(f"  {label}: {len(recs)} records in {elapsed:.1f}s")
             total_records += len(recs)
 
-        # Customers first to build id->email map for new buyers
-        _timed("customers", 0.1, lambda: self._sync_table(
+        _timed_today("customers", 0.1, lambda: self._sync_table(
             "customers", client.get_customers, self._upsert_customers,
             since=since, headless=headless,
         ))
         customer_map = self._build_customer_map()
 
-        # Today's orders
-        _timed("orders", 0.5, lambda: self._sync_table(
+        _timed_today("orders", 0.5, lambda: self._sync_table(
             "orders", client.get_orders, self._upsert_orders,
             since=since, customer_map=customer_map, headless=headless,
         ))
 
-        # Today's charges
-        _timed("charges", 0.85, lambda: self._sync_table(
+        _timed_today("charges", 0.85, lambda: self._sync_table(
             "charges", client.get_charges, self._upsert_charges,
             since=since, customer_map=customer_map, headless=headless,
         ))
