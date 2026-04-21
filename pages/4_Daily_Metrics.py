@@ -328,6 +328,30 @@ with tab6:
     )
     if selected_products:
         ltv_df = ltv_df[ltv_df["product_name"].isin(selected_products)]
+
+    # Products that survived the entry price slider — used to sync the progression chart.
+    # Tracked separately so prog_df is never restricted by ltv_df's maturity cutoff.
+    _ep_price_products: set[str] | None = None
+    if not ltv_df.empty and "avg_entry_price" in ltv_df.columns:
+        _ep_min = float(ltv_df["avg_entry_price"].min())
+        _ep_max = float(ltv_df["avg_entry_price"].max())
+        if _ep_min < _ep_max:
+            # Key includes window + products so the slider resets when the cohort changes
+            _ep_key = f"ltv_entry_price_filter_{_chosen_window}_{'_'.join(sorted(selected_products or []))}"
+            _ep_range = st.slider(
+                "Filter by avg entry price ($)",
+                min_value=_ep_min,
+                max_value=_ep_max,
+                value=(_ep_min, _ep_max),
+                format="$%.0f",
+                key=_ep_key,
+            )
+            ltv_df = ltv_df[
+                (ltv_df["avg_entry_price"] >= _ep_range[0])
+                & (ltv_df["avg_entry_price"] <= _ep_range[1])
+            ]
+            _ep_price_products = set(ltv_df["product_name"])
+
     if not ltv_df.empty:
         _chart_title = f"Average {_window_display} LTV by Entry Product"
         if _chosen_window is not None:
@@ -445,12 +469,29 @@ with tab6:
     st.markdown("---")
     st.subheader("LTV Progression Over Time")
     st.caption(
-        "Shows how average LTV grows at 15, 30, 60, 90, 120, 150, and 180 days after first purchase. "
-        "Each window only includes customers whose cohort has fully matured."
+        "Day 1 = avg first-order spend. Subsequent windows show avg LTV at 15, 30, 60, 90, 120, 150, "
+        "and 180 days after first purchase. Each window only includes customers whose cohort has fully matured."
     )
     prog_df = _cached_ltv_progression(ltv_start, ltv_end)
     if selected_products:
         prog_df = prog_df[prog_df["product_name"].isin(selected_products)]
+
+    if _ep_price_products is not None:
+        prog_df = prog_df[prog_df["product_name"].isin(_ep_price_products)]
+
+    # avg_entry_price as Day 1 anchor; concat before the matured-cohort windows so the line starts at first-order spend
+    if not ltv_df.empty and "avg_entry_price" in ltv_df.columns:
+        _day1 = ltv_df[["product_name", "avg_entry_price", "customer_count"]].copy()
+        _day1 = _day1.rename(columns={"avg_entry_price": "avg_ltv"})
+        _day1["window_days"] = 1
+        prog_df = pd.concat(
+            [_day1[["window_days", "product_name", "avg_ltv", "customer_count"]], prog_df],
+            ignore_index=True,
+        )
+        prog_df = prog_df.sort_values(["product_name", "window_days"]).reset_index(drop=True)
+
+    _prog_tick_vals = [1] + _PROGRESSION_WINDOWS
+
     if not prog_df.empty:
         fig_prog = px.line(
             prog_df,
@@ -468,14 +509,14 @@ with tab6:
             hover_data={"customer_count": True},
         )
         fig_prog.update_layout(
-            xaxis=dict(tickvals=_PROGRESSION_WINDOWS),
+            xaxis=dict(tickvals=_prog_tick_vals, ticktext=["Day 1"] + [str(w) for w in _PROGRESSION_WINDOWS]),
             yaxis_tickformat="$,.0f",
         )
         st.plotly_chart(fig_prog, use_container_width=True)
 
         pivot = (
             prog_df.pivot_table(index="product_name", columns="window_days", values="avg_ltv", aggfunc="mean")
-            .rename(columns={w: f"{w}d" for w in _PROGRESSION_WINDOWS})
+            .rename(columns={1: "Day 1", **{w: f"{w}d" for w in _PROGRESSION_WINDOWS}})
         )
         pivot.index.name = "Entry Product"
         st.dataframe(
