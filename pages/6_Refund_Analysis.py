@@ -10,6 +10,12 @@ from methodology import REFUND_ANALYSIS_METHODOLOGY
 from automate import render_automate_button
 from shared import load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
+
+@st.cache_data(ttl=300)
+def _cached_refund_analysis():
+    return refund_analysis(load_charges(), load_orders(), load_subscriptions())
+
+
 st.set_page_config(page_title="Refund Analysis", page_icon=":money_with_wings:", layout="wide")
 
 require_auth()
@@ -26,7 +32,7 @@ if charges_df.empty:
     st.info("No charge data yet. Run a sync from the sidebar.")
     st.stop()
 
-by_product, time_to_refund, monthly_trend = refund_analysis(charges_df, orders_df, subs_df)
+by_product, time_to_refund, monthly_trend = _cached_refund_analysis()
 
 if by_product.empty:
     st.warning("No refund data available.")

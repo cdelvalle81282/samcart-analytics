@@ -281,11 +281,11 @@ def generate_cohort_activity(
 ) -> pd.DataFrame:
     from analytics import build_cohort_performance
     data = _load_data(cache)
-    product_id = kwargs.get("product_id") or None
+    product_name = kwargs.get("product_name") or kwargs.get("product_id") or None
     interval_filter = kwargs.get("interval_filter") or None
     result = build_cohort_performance(
         data["charges"], data["orders"], data["subscriptions"],
-        product_filter=product_id, interval_filter=interval_filter,
+        product_filter=product_name, interval_filter=interval_filter,
     )
     return result[0]  # activity summary
 
@@ -296,11 +296,11 @@ def generate_cohort_renewal_rates(
 ) -> pd.DataFrame:
     from analytics import build_cohort_performance
     data = _load_data(cache)
-    product_id = kwargs.get("product_id") or None
+    product_name = kwargs.get("product_name") or kwargs.get("product_id") or None
     interval_filter = kwargs.get("interval_filter") or None
     result = build_cohort_performance(
         data["charges"], data["orders"], data["subscriptions"],
-        product_filter=product_id, interval_filter=interval_filter,
+        product_filter=product_name, interval_filter=interval_filter,
     )
     return result[1]  # renewal_rates
 
@@ -311,11 +311,11 @@ def generate_cohort_stick_rates(
 ) -> pd.DataFrame:
     from analytics import build_cohort_performance
     data = _load_data(cache)
-    product_id = kwargs.get("product_id") or None
+    product_name = kwargs.get("product_name") or kwargs.get("product_id") or None
     interval_filter = kwargs.get("interval_filter") or None
     result = build_cohort_performance(
         data["charges"], data["orders"], data["subscriptions"],
-        product_filter=product_id, interval_filter=interval_filter,
+        product_filter=product_name, interval_filter=interval_filter,
     )
     return result[2]  # stick_rates
 
@@ -326,11 +326,11 @@ def generate_cohort_heatmap(
 ) -> pd.DataFrame:
     from analytics import build_cohort_heatmap
     data = _load_data(cache)
-    product_id = kwargs.get("product_id") or None
+    product_name = kwargs.get("product_name") or kwargs.get("product_id") or None
     interval_filter = kwargs.get("interval_filter") or None
     df = build_cohort_heatmap(
         data["charges"], data["orders"], data["subscriptions"],
-        product_filter=product_id, interval_filter=interval_filter,
+        product_filter=product_name, interval_filter=interval_filter,
     )
     if not df.empty:
         df = df.reset_index()

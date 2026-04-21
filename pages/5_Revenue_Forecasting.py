@@ -14,6 +14,17 @@ from methodology import (
 from automate import render_automate_button
 from shared import load_subscriptions, render_doc_tabs, render_sync_sidebar
 
+
+@st.cache_data(ttl=300)
+def _cached_mrr_waterfall():
+    return mrr_waterfall(load_subscriptions())
+
+
+@st.cache_data(ttl=300)
+def _cached_revenue_forecast():
+    return revenue_forecast(load_subscriptions())
+
+
 st.set_page_config(page_title="Revenue Forecasting", page_icon=":crystal_ball:", layout="wide")
 
 require_auth()
@@ -36,7 +47,7 @@ tab1, tab2 = st.tabs(["MRR Waterfall", "Revenue Forecast"])
 
 # --- Tab 1: MRR Waterfall ---
 with tab1:
-    waterfall_df = mrr_waterfall(subs_df)
+    waterfall_df = _cached_mrr_waterfall()
 
     if waterfall_df.empty:
         st.warning("No MRR data available.")
@@ -94,7 +105,7 @@ with tab1:
 
 # --- Tab 2: Revenue Forecast ---
 with tab2:
-    forecast_df = revenue_forecast(subs_df)
+    forecast_df = _cached_revenue_forecast()
 
     if forecast_df.empty:
         st.warning("No forecast data available. Ensure subscriptions have `next_bill_date` populated (requires a full sync).")

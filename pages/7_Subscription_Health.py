@@ -14,6 +14,22 @@ from methodology import (
 from automate import render_automate_button
 from shared import load_subscriptions, render_doc_tabs, render_sync_sidebar
 
+
+@st.cache_data(ttl=300)
+def _cached_churn_analysis():
+    return churn_analysis(load_subscriptions())
+
+
+@st.cache_data(ttl=300)
+def _cached_trial_conversion():
+    return trial_conversion(load_subscriptions())
+
+
+@st.cache_data(ttl=300)
+def _cached_subscription_aging():
+    return subscription_aging(load_subscriptions())
+
+
 st.set_page_config(page_title="Subscription Health", page_icon=":heartbeat:", layout="wide")
 
 require_auth()
@@ -36,7 +52,7 @@ tab1, tab2, tab3 = st.tabs(["Churn Analysis", "Trial-to-Paid", "Subscription Agi
 
 # --- Tab 1: Churn Analysis ---
 with tab1:
-    by_product, monthly_trend = churn_analysis(subs_df)
+    by_product, monthly_trend = _cached_churn_analysis()
 
     if by_product.empty:
         st.warning("No churn data available.")
@@ -100,7 +116,7 @@ with tab1:
 
 # --- Tab 2: Trial-to-Paid ---
 with tab2:
-    trial_df = trial_conversion(subs_df)
+    trial_df = _cached_trial_conversion()
 
     if trial_df.empty:
         st.warning("No trial data available. Ensure `trial_days` is populated (requires full sync).")
@@ -139,7 +155,7 @@ with tab2:
 
 # --- Tab 3: Subscription Aging ---
 with tab3:
-    aging_df = subscription_aging(subs_df)
+    aging_df = _cached_subscription_aging()
 
     if aging_df.empty:
         st.warning("No active subscriptions for aging analysis.")

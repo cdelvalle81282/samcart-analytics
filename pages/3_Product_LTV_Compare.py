@@ -11,6 +11,12 @@ from methodology import PRODUCT_LTV_METHODOLOGY
 from automate import render_automate_button
 from shared import load_orders, load_products, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
+
+@st.cache_data(ttl=300)
+def _cached_product_ltv(orders_df, subs_df, products_df):
+    return product_ltv_ranking(orders_df, subs_df, products_df)
+
+
 st.set_page_config(page_title="Product LTV Compare", page_icon=":package:", layout="wide")
 
 require_auth()
@@ -58,7 +64,7 @@ min_orders = col2.number_input("Min Order Count", min_value=0, value=0, step=1)
 # Product ranking
 # ------------------------------------------------------------------
 
-ranking = product_ltv_ranking(orders_df, subs_df, products_df)
+ranking = _cached_product_ltv(orders_df, subs_df, products_df)
 
 if ranking.empty:
     st.warning("No product data to display.")

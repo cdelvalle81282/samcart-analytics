@@ -20,6 +20,22 @@ from methodology import (
 from automate import render_automate_button
 from shared import load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
+
+@st.cache_data(ttl=300)
+def _cached_product_mrr_trend():
+    return product_mrr_trend(load_subscriptions())
+
+
+@st.cache_data(ttl=300)
+def _cached_product_attach_rate():
+    return product_attach_rate(load_orders())
+
+
+@st.cache_data(ttl=300)
+def _cached_revenue_mix():
+    return new_vs_renewal_revenue_mix(load_charges(), load_orders(), load_subscriptions())
+
+
 st.set_page_config(page_title="Product Deep Dive", page_icon=":package:", layout="wide")
 
 require_auth()
@@ -44,7 +60,7 @@ tab1, tab2, tab3 = st.tabs(["MRR Trend", "Attach Rate", "Revenue Mix"])
 
 # --- Tab 1: Product MRR Trend ---
 with tab1:
-    mrr_df = product_mrr_trend(subs_df)
+    mrr_df = _cached_product_mrr_trend()
 
     if mrr_df.empty:
         st.warning("No MRR trend data available.")
@@ -78,7 +94,7 @@ with tab1:
 
 # --- Tab 2: Attach Rate ---
 with tab2:
-    attach_df = product_attach_rate(orders_df)
+    attach_df = _cached_product_attach_rate()
 
     if attach_df.empty:
         st.warning("Not enough product diversity for attach rate analysis (need at least 2 products with 5+ buyers each).")
@@ -128,7 +144,7 @@ with tab2:
 
 # --- Tab 3: Revenue Mix ---
 with tab3:
-    mix_df = new_vs_renewal_revenue_mix(charges_df, orders_df, subs_df)
+    mix_df = _cached_revenue_mix()
 
     # Initialize so the automate button below always has a value
     _mix_all_products: list[str] = []

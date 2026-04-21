@@ -9,7 +9,7 @@ from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import COHORT_RETENTION_METHODOLOGY
 from automate import render_automate_button
-from shared import load_charges, load_orders, load_products, load_subscriptions, render_doc_tabs, render_sync_sidebar
+from shared import load_charges, load_orders, load_subscriptions, render_doc_tabs, render_sync_sidebar
 
 
 @st.cache_data(ttl=300)
@@ -43,7 +43,6 @@ render_sync_sidebar()
 st.title("Cohort Performance Report")
 
 subs_df = load_subscriptions()
-products_df = load_products()
 
 if subs_df.empty:
     st.info("No subscription data yet. Run a sync from the sidebar.")
@@ -55,24 +54,13 @@ if subs_df.empty:
 
 col_f1, col_f2, col_f3 = st.columns(3)
 
-# Product filter — build a name-to-id map so we can pass product_id downstream
-product_name_to_id: dict[str, str] = {}
+# Product filter — build from subscription product_name so all subs are reachable
+# (SamCart can have multiple product_ids with the same display name; filtering by
+# name instead of id ensures we don't miss subs filed under a different product record)
 product_options = ["All Products"]
-if not products_df.empty and "name" in products_df.columns:
-    for _, row in products_df[["id", "name"]].dropna().iterrows():
-        name = str(row["name"])
-        pid = str(row["id"])
-        if name not in product_name_to_id:
-            product_name_to_id[name] = pid
-            product_options.append(name)
-elif not subs_df.empty and "product_name" in subs_df.columns:
-    # Fallback: derive from subscriptions (product_id + product_name)
-    for _, row in subs_df[["product_id", "product_name"]].dropna().drop_duplicates("product_name").iterrows():
-        name = str(row["product_name"])
-        pid = str(row["product_id"])
-        if name not in product_name_to_id:
-            product_name_to_id[name] = pid
-            product_options.append(name)
+if not subs_df.empty and "product_name" in subs_df.columns:
+    names = sorted(subs_df["product_name"].dropna().unique().tolist())
+    product_options += names
 
 selected_product = col_f1.selectbox("Filter by Product", product_options)
 
@@ -92,7 +80,7 @@ cohort_view = col_f3.radio(
 # Resolve filter values for analytics functions
 product_filter: str | None = None
 if selected_product != "All Products":
-    product_filter = product_name_to_id.get(selected_product)
+    product_filter = selected_product
 
 interval_filter: str | None = None
 if selected_interval != "All Intervals":
@@ -105,7 +93,7 @@ if selected_interval != "All Intervals":
 filtered_subs = subs_df.copy()
 if product_filter is not None:
     filtered_subs = filtered_subs[
-        filtered_subs["product_id"].astype(str) == str(product_filter)
+        filtered_subs["product_name"].astype(str) == str(product_filter)
     ]
 if selected_interval != "All Intervals":
     filtered_subs = filtered_subs[
@@ -177,7 +165,7 @@ _cohort_interval_label = selected_interval if selected_interval != "All Interval
 _cohort_filters_summary = f"Product: {_cohort_product_label} | Interval: {_cohort_interval_label}"
 _cohort_ep: dict = {}
 if product_filter:
-    _cohort_ep["product_id"] = product_filter
+    _cohort_ep["product_name"] = product_filter
 if interval_filter:
     _cohort_ep["interval_filter"] = interval_filter
 

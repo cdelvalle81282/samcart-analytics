@@ -263,7 +263,7 @@ def build_cohort_performance(
 
     # --- 4. Apply product/interval filters ---
     if product_filter:
-        df = df[df["product_id"].astype(str) == str(product_filter)]
+        df = df[df["product_name"].astype(str) == str(product_filter)]
     if interval_filter:
         df = df[df["interval"].astype(str).str.lower() == interval_filter.lower()]
     if df.empty:
@@ -420,7 +420,7 @@ def build_cohort_heatmap(
 
     # --- 4. Apply product/interval filters ---
     if product_filter:
-        df = df[df["product_id"].astype(str) == str(product_filter)]
+        df = df[df["product_name"].astype(str) == str(product_filter)]
     if interval_filter:
         df = df[df["interval"].astype(str).str.lower() == interval_filter.lower()]
     if df.empty:

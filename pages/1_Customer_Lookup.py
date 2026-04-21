@@ -14,6 +14,11 @@ from shared import get_cache, load_charges, load_orders, load_subscriptions, ren
 
 logger = logging.getLogger(__name__)
 
+
+@st.cache_data(ttl=300)
+def _cached_ltv():
+    return calculate_customer_ltv(load_orders(), load_charges(), load_subscriptions())
+
 st.set_page_config(page_title="Customer Lookup", page_icon=":bust_in_silhouette:", layout="wide")
 
 require_auth()
@@ -98,7 +103,7 @@ if query:
             st.subheader(f"Customer: {selected_email}")
 
             # Customer LTV
-            ltv_df = calculate_customer_ltv(orders_df, charges_df, subs_df)
+            ltv_df = _cached_ltv()
             customer_ltv = ltv_df[ltv_df["customer_email"] == selected_email]
 
             if not customer_ltv.empty:
@@ -109,9 +114,9 @@ if query:
                 c3.metric("Orders", f"{row.get('order_count', 0):,}")
                 c4.metric("Active Subs", f"{row.get('active_subs', 0):,}")
 
-            # Order history
+            # Order history — filter in-memory, skip redundant DB round-trip
             st.subheader("Order History")
-            cust_orders = cache.get_customer_orders(selected_email)
+            cust_orders = orders_df[orders_df["customer_email"] == selected_email].sort_values("created_at", ascending=False)
             if not cust_orders.empty:
                 st.dataframe(
                     cust_orders,
@@ -124,7 +129,7 @@ if query:
 
             # Subscription history
             st.subheader("Subscriptions")
-            cust_subs = cache.get_customer_subscriptions(selected_email)
+            cust_subs = subs_df[subs_df["customer_email"] == selected_email].sort_values("created_at", ascending=False)
             if not cust_subs.empty:
                 st.dataframe(
                     cust_subs,
@@ -136,7 +141,7 @@ if query:
 
             # Charge history
             st.subheader("Charges")
-            cust_charges = cache.get_customer_charges(selected_email)
+            cust_charges = charges_df[charges_df["customer_email"] == selected_email].sort_values("created_at", ascending=False)
             if not cust_charges.empty:
                 st.dataframe(
                     cust_charges,
@@ -149,7 +154,7 @@ if query:
 else:
     # Show overall LTV table when no search
     st.subheader("Top Customers by LTV")
-    ltv_df = calculate_customer_ltv(orders_df, charges_df, subs_df)
+    ltv_df = _cached_ltv()
     if not ltv_df.empty:
         st.dataframe(
             ltv_df.head(50),

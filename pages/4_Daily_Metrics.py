@@ -23,10 +23,21 @@ from shared import load_charges, load_orders, load_subscriptions, render_doc_tab
 
 logger = logging.getLogger(__name__)
 
+_PROGRESSION_WINDOWS = [15, 30, 60, 90, 120, 150, 180]
+
 
 @st.cache_data(ttl=300)
 def _cached_daily_summary():
     return build_daily_summary(load_orders(), load_charges(), load_subscriptions())
+
+
+@st.cache_data(ttl=300)
+def _cached_ltv_progression(ltv_start, ltv_end):
+    return ltv_progression_by_entry_product(
+        load_orders(), load_charges(), load_subscriptions(),
+        start_date=ltv_start, end_date=ltv_end,
+        windows=_PROGRESSION_WINDOWS,
+    )
 
 st.set_page_config(page_title="Daily Metrics", page_icon=":chart_with_upwards_trend:", layout="wide")
 
@@ -431,16 +442,13 @@ with tab6:
             + (f" Try a smaller window — cohorts need at least {_chosen_window} days to mature." if _chosen_window else "")
         )
 
-    # LTV progression chart: avg LTV at 30/60/90/180/365 days per product
     st.markdown("---")
     st.subheader("LTV Progression Over Time")
     st.caption(
-        "Shows how average LTV grows at 30, 60, 90, 180, and 365 days after first purchase. "
+        "Shows how average LTV grows at 15, 30, 60, 90, 120, 150, and 180 days after first purchase. "
         "Each window only includes customers whose cohort has fully matured."
     )
-    prog_df = ltv_progression_by_entry_product(
-        orders_df, charges_df, subs_df, start_date=ltv_start, end_date=ltv_end,
-    )
+    prog_df = _cached_ltv_progression(ltv_start, ltv_end)
     if selected_products:
         prog_df = prog_df[prog_df["product_name"].isin(selected_products)]
     if not prog_df.empty:
@@ -454,14 +462,26 @@ with tab6:
                 "window_days": "Days Since First Purchase",
                 "avg_ltv": "Avg LTV ($)",
                 "product_name": "Entry Product",
+                "customer_count": "Customers",
             },
             title="Average LTV Growth by Days Since First Purchase",
+            hover_data={"customer_count": True},
         )
         fig_prog.update_layout(
-            xaxis=dict(tickvals=[30, 60, 90, 180, 365]),
+            xaxis=dict(tickvals=_PROGRESSION_WINDOWS),
             yaxis_tickformat="$,.0f",
         )
         st.plotly_chart(fig_prog, use_container_width=True)
+
+        pivot = (
+            prog_df.pivot_table(index="product_name", columns="window_days", values="avg_ltv", aggfunc="mean")
+            .rename(columns={w: f"{w}d" for w in _PROGRESSION_WINDOWS})
+        )
+        pivot.index.name = "Entry Product"
+        st.dataframe(
+            pivot.style.format("${:,.2f}", na_rep="—"),
+            use_container_width=True,
+        )
         render_export_buttons(prog_df, "ltv_progression", key_prefix="ltv_prog")
     else:
         st.info("Not enough mature cohort data to build a progression chart.")

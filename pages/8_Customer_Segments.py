@@ -14,6 +14,22 @@ from methodology import (
 from automate import render_automate_button
 from shared import load_charges, load_orders, render_doc_tabs, render_sync_sidebar
 
+
+@st.cache_data(ttl=300)
+def _cached_rfm_segmentation():
+    return rfm_segmentation(load_orders(), load_charges())
+
+
+@st.cache_data(ttl=300)
+def _cached_multi_product_buyers():
+    return multi_product_buyers(load_orders())
+
+
+@st.cache_data(ttl=300)
+def _cached_customer_concentration():
+    return customer_concentration(load_charges())
+
+
 st.set_page_config(page_title="Customer Segments", page_icon=":busts_in_silhouette:", layout="wide")
 
 require_auth()
@@ -37,7 +53,7 @@ tab1, tab2, tab3 = st.tabs(["RFM Segmentation", "Multi-Product Buyers", "Revenue
 
 # --- Tab 1: RFM Segmentation ---
 with tab1:
-    rfm_df = rfm_segmentation(orders_df, charges_df)
+    rfm_df = _cached_rfm_segmentation()
 
     if rfm_df.empty:
         st.warning("Not enough customers for RFM analysis (need at least 10).")
@@ -101,7 +117,7 @@ with tab1:
 
 # --- Tab 2: Multi-Product Buyers ---
 with tab2:
-    buyer_summary, product_combos = multi_product_buyers(orders_df)
+    buyer_summary, product_combos = _cached_multi_product_buyers()
 
     if buyer_summary.empty:
         st.warning("No multi-product buyers found.")
@@ -139,7 +155,7 @@ with tab2:
 
 # --- Tab 3: Revenue Concentration ---
 with tab3:
-    conc_df = customer_concentration(charges_df)
+    conc_df = _cached_customer_concentration()
 
     if conc_df.empty:
         st.warning("No revenue concentration data available.")

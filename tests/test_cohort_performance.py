@@ -407,7 +407,7 @@ class TestProductFilter:
         orders = _make_orders()
         subs = _make_subscriptions()
         activity, _, _ = build_cohort_performance(
-            charges, orders, subs, product_filter="p1",
+            charges, orders, subs, product_filter="Widget",
         )
         assert not activity.empty
 
@@ -416,7 +416,7 @@ class TestProductFilter:
         orders = _make_orders()
         subs = _make_subscriptions()
         activity, _, _ = build_cohort_performance(
-            charges, orders, subs, product_filter="p_nonexistent",
+            charges, orders, subs, product_filter="NonExistentProduct",
         )
         assert activity.empty
 
@@ -564,14 +564,14 @@ class TestHeatmapFilters:
     def test_product_filter_match(self):
         result = build_cohort_heatmap(
             _make_charges(), _make_orders(), _make_subscriptions(),
-            product_filter="p1",
+            product_filter="Widget",
         )
         assert not result.empty
 
     def test_product_filter_no_match(self):
         result = build_cohort_heatmap(
             _make_charges(), _make_orders(), _make_subscriptions(),
-            product_filter="p_nonexistent",
+            product_filter="NonExistentProduct",
         )
         assert result.empty
 
