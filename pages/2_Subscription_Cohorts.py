@@ -30,11 +30,6 @@ def _cached_cohort_heatmap(product_filter, interval_filter):
     )
 
 
-st.set_page_config(
-    page_title="Subscription Cohorts",
-    page_icon=":chart_with_upwards_trend:",
-    layout="wide",
-)
 
 require_auth()
 require_permission("page:cohorts")

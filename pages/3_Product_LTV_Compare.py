@@ -17,7 +17,6 @@ def _cached_product_ltv(orders_df, subs_df, products_df):
     return product_ltv_ranking(orders_df, subs_df, products_df)
 
 
-st.set_page_config(page_title="Product LTV Compare", page_icon=":package:", layout="wide")
 
 require_auth()
 require_permission("page:product_ltv")

@@ -39,7 +39,6 @@ def _cached_ltv_progression(ltv_start, ltv_end):
         windows=_PROGRESSION_WINDOWS,
     )
 
-st.set_page_config(page_title="Daily Metrics", page_icon=":chart_with_upwards_trend:", layout="wide")
 
 require_auth()
 require_permission("page:daily_metrics")

@@ -35,7 +35,6 @@ def _cached_trial_days_to_convert():
     return trial_days_to_convert(load_subscriptions())
 
 
-st.set_page_config(page_title="Subscription Health", page_icon=":heartbeat:", layout="wide")
 
 require_auth()
 require_permission("page:subscription_health")

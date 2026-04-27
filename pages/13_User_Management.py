@@ -72,7 +72,6 @@ def _format_schedule(report: dict) -> str:
     return f"Every day at {local_time} {tz_abbr}"
 
 
-st.set_page_config(page_title="User Management", page_icon=":gear:", layout="wide")
 
 require_auth()
 require_permission("admin:manage_users")

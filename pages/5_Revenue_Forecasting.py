@@ -42,7 +42,6 @@ def _cached_upcoming(weeks: int):
     return upcoming_renewals_and_cancellations(load_subscriptions(), lookahead_weeks=weeks)
 
 
-st.set_page_config(page_title="Revenue Forecasting", page_icon=":crystal_ball:", layout="wide")
 
 require_auth()
 require_permission("page:revenue_forecast")

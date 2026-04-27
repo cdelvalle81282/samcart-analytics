@@ -11,7 +11,6 @@ import streamlit as st
 from pii_access import approve_request, deny_request, validate_token
 from shared import get_cache
 
-st.set_page_config(page_title="PII Approval", page_icon=":shield:", layout="centered")
 
 st.title("PII Access Approval")
 

@@ -30,7 +30,6 @@ def _cached_customer_concentration():
     return customer_concentration(load_charges())
 
 
-st.set_page_config(page_title="Customer Segments", page_icon=":busts_in_silhouette:", layout="wide")
 
 require_auth()
 require_permission("page:customer_segments")

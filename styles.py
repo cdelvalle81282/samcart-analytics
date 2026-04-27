@@ -54,13 +54,6 @@ _CSS = """
     margin-bottom: 16px;
 }
 
-/* ── Body text ── */
-html, body, [data-testid="stAppViewContainer"] p,
-[data-testid="stAppViewContainer"] span,
-[data-testid="stAppViewContainer"] div {
-    font-family: 'IBM Plex Mono', monospace;
-}
-
 /* ── st.metric cards ── */
 [data-testid="stMetric"] {
     background: #0D0F1A !important;

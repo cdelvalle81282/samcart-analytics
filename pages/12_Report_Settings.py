@@ -16,9 +16,6 @@ from shared import get_cache, render_sync_sidebar
 
 logger = logging.getLogger(__name__)
 
-st.set_page_config(
-    page_title="Report Settings", page_icon=":envelope:", layout="wide"
-)
 
 require_auth()
 require_admin()

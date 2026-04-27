@@ -21,7 +21,6 @@ def _cached_failed_payments():
     return failed_payment_analysis(load_charges(), load_orders(), load_subscriptions())
 
 
-st.set_page_config(page_title="Refund Analysis", page_icon=":money_with_wings:", layout="wide")
 
 require_auth()
 require_permission("page:refund_analysis")

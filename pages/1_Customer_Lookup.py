@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 def _cached_ltv():
     return calculate_customer_ltv(load_orders(), load_charges(), load_subscriptions())
 
-st.set_page_config(page_title="Customer Lookup", page_icon=":bust_in_silhouette:", layout="wide")
 
 require_auth()
 require_permission("page:customer_lookup")

@@ -36,7 +36,6 @@ def _cached_revenue_mix():
     return new_vs_renewal_revenue_mix(load_charges(), load_orders(), load_subscriptions())
 
 
-st.set_page_config(page_title="Product Deep Dive", page_icon=":package:", layout="wide")
 
 require_auth()
 require_permission("page:product_deep_dive")
