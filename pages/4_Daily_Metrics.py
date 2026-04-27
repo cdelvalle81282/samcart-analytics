@@ -40,6 +40,24 @@ def _cached_ltv_progression(ltv_start, ltv_end):
     )
 
 
+@st.cache_data(ttl=300)
+def _cached_new_customer_ltv(ltv_start, ltv_end, window_days):
+    return new_customer_ltv_by_entry_product(
+        load_orders(), load_charges(), load_subscriptions(),
+        start_date=ltv_start, end_date=ltv_end,
+        ltv_window_days=window_days,
+    )
+
+
+@st.cache_data(ttl=300)
+def _cached_ltv_audit(ltv_start, ltv_end, window_days):
+    return ltv_audit_charges(
+        load_orders(), load_charges(), load_subscriptions(),
+        start_date=ltv_start, end_date=ltv_end,
+        ltv_window_days=window_days,
+    )
+
+
 require_auth()
 require_permission("page:daily_metrics")
 render_sync_sidebar()
@@ -321,11 +339,7 @@ with tab6:
         _chosen_window = _WINDOW_PRESETS[_window_label]  # type: ignore[assignment]
         _window_display = _window_label if _chosen_window is None else f"{_chosen_window}-day"
 
-    ltv_df = new_customer_ltv_by_entry_product(
-        orders_df, charges_df, subs_df,
-        start_date=ltv_start, end_date=ltv_end,
-        ltv_window_days=_chosen_window,
-    )
+    ltv_df = _cached_new_customer_ltv(ltv_start, ltv_end, _chosen_window)
     if selected_products:
         ltv_df = ltv_df[ltv_df["product_name"].isin(selected_products)]
 
@@ -385,11 +399,7 @@ with tab6:
 
         # Audit expander: consistency check + charge-level detail (computed on open only)
         with st.expander("Audit — charge-level detail"):
-            _audit_raw = ltv_audit_charges(
-                orders_df, charges_df, subs_df,
-                start_date=ltv_start, end_date=ltv_end,
-                ltv_window_days=_chosen_window,
-            )
+            _audit_raw = _cached_ltv_audit(ltv_start, ltv_end, _chosen_window)
             if _audit_raw.empty:
                 st.info("No charge data available for audit.")
             else:

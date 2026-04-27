@@ -193,6 +193,24 @@ hr {
     border-left: 3px solid #1A1D2E !important;
 }
 
+/* ── Multiselect selected-item tags ── */
+[data-testid="stMultiSelect"] span[data-baseweb="tag"] {
+    background-color: #1A1D2E !important;
+    border: 1px solid #3A3F5C !important;
+    border-radius: 2px !important;
+}
+[data-testid="stMultiSelect"] span[data-baseweb="tag"] span {
+    color: #E8ECF8 !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.72rem !important;
+}
+[data-testid="stMultiSelect"] span[data-baseweb="tag"] [role="presentation"] {
+    color: #3A3F5C !important;
+}
+[data-testid="stMultiSelect"] span[data-baseweb="tag"]:hover [role="presentation"] {
+    color: #B8FF57 !important;
+}
+
 /* ── Input widget labels ── */
 [data-testid="stSelectbox"] label,
 [data-testid="stMultiSelect"] label,
