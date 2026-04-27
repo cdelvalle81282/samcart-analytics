@@ -11,7 +11,7 @@ st.set_page_config(
 pg = st.navigation(
     {
         "": [
-            st.Page("pages/0_Overview.py", title="Overview", icon="◉", default=True),
+            st.Page("pages/0_Overview.py", title="Overview", icon="🏠", default=True),
         ],
         "Revenue": [
             st.Page("pages/5_Revenue_Forecasting.py", title="Revenue Forecasting", icon="📈"),
