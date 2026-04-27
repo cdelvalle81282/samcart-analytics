@@ -7,6 +7,7 @@ import streamlit as st
 
 from cache import SamCartCache
 from samcart_api import SamCartAPIError, SamCartClient
+from styles import inject_styles
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ def render_sync_sidebar() -> None:
 
     Safe to call from any page — uses the shared singleton client/cache.
     """
+    inject_styles()
+
     client = get_client()
     cache = get_cache()
 

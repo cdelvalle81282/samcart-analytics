@@ -23,8 +23,6 @@ st.set_page_config(
 
 require_auth()
 
-st.caption(f"v{VERSION} | Last App Update: {LAST_UPDATED}")
-
 # ------------------------------------------------------------------
 # Sidebar — sync controls
 # ------------------------------------------------------------------
@@ -45,7 +43,8 @@ if st.sidebar.button("Clean Up Old Exports", use_container_width=True):
 # Main dashboard
 # ------------------------------------------------------------------
 
-st.title("Dashboard")
+st.title("Overview")
+st.caption(f"Revenue, customers, and subscription health at a glance  ·  v{VERSION} · Updated {LAST_UPDATED}")
 
 orders_df = load_orders()
 subs_df = load_subscriptions()
@@ -56,8 +55,9 @@ if orders_df.empty and subs_df.empty:
     st.info("No data yet. Use the **Sync Data** button in the sidebar to fetch data from SamCart.")
     st.stop()
 
-# Metric cards
-col1, col2, col3, col4 = st.columns(4)
+# ------------------------------------------------------------------
+# Metric row — all 5 KPIs in one line
+# ------------------------------------------------------------------
 
 total_revenue = total_net_revenue(charges_df, orders_df)
 total_customers = customers_df["id"].nunique() if not customers_df.empty else 0
@@ -68,19 +68,25 @@ active_subs = (
 )
 avg_order = orders_df["total"].mean() if not orders_df.empty else 0
 
-col1.metric("Total Revenue", f"${total_revenue:,.2f}")
-col2.metric("Total Customers", f"{total_customers:,}")
-col3.metric("Active Subscriptions", f"{active_subs:,}")
-col4.metric("Avg Order Value", f"${avg_order:,.2f}")
-
-# Churn rate
+churn_rate = 0.0
 if not subs_df.empty:
     total_subs = subs_df["id"].nunique()
     canceled = subs_df[subs_df["status"].str.lower().isin(["canceled", "cancelled"])]["id"].nunique()
     churn_rate = canceled / total_subs * 100 if total_subs > 0 else 0
-    st.metric("Overall Churn Rate", f"{churn_rate:.1f}%")
 
+col1, col2, col3, col4, col5 = st.columns(5)
+col1.metric("Total Revenue", f"${total_revenue:,.2f}")
+col2.metric("Total Customers", f"{total_customers:,}")
+col3.metric("Active Subscriptions", f"{active_subs:,}")
+col4.metric("Avg Order Value", f"${avg_order:,.2f}")
+col5.metric("Overall Churn Rate", f"{churn_rate:.1f}%")
+
+st.markdown("")
+
+# ------------------------------------------------------------------
 # Monthly revenue chart
+# ------------------------------------------------------------------
+
 st.subheader("Monthly Revenue")
 monthly = monthly_revenue_summary(orders_df, charges_df)
 if not monthly.empty:
@@ -89,15 +95,28 @@ if not monthly.empty:
         x="month",
         y="total_revenue",
         text="order_count",
-        labels={"total_revenue": "Revenue ($)", "month": "Month", "order_count": "Orders"},
+        labels={"total_revenue": "Revenue", "month": "Month", "order_count": "Orders"},
     )
-    fig.update_traces(texttemplate="%{text} orders", textposition="outside")
-    fig.update_layout(yaxis_tickformat="$,.0f")
+    fig.update_traces(
+        texttemplate="%{text} orders",
+        textposition="outside",
+        marker_color="#4F90F0",
+        hovertemplate="<b>%{x}</b><br>Revenue: $%{y:,.0f}<br>Orders: %{text}<extra></extra>",
+    )
+    fig.update_layout(
+        yaxis_tickformat="$,.0f",
+        yaxis_title=None,
+        xaxis_title=None,
+        showlegend=False,
+    )
     st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("No monthly data to display.")
 
+# ------------------------------------------------------------------
 # Recent orders
+# ------------------------------------------------------------------
+
 st.subheader("Recent Orders")
 if not orders_df.empty:
     _user = st.session_state.get("username", "")
