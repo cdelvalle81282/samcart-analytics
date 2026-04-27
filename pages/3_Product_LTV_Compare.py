@@ -23,6 +23,7 @@ require_permission("page:product_ltv")
 render_sync_sidebar()
 
 st.title("Product LTV Comparison")
+st.caption("Which products generate the most revenue and the highest customer lifetime value.")
 
 
 orders_df = load_orders()

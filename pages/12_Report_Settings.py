@@ -22,6 +22,7 @@ require_admin()
 render_sync_sidebar()
 
 st.title("Report Settings")
+st.caption("View and test configured scheduled reports.")
 
 # ------------------------------------------------------------------
 # Load config

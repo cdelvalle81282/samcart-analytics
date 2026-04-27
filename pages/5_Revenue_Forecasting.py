@@ -48,6 +48,7 @@ require_permission("page:revenue_forecast")
 render_sync_sidebar()
 
 st.title("Revenue Forecasting")
+st.caption("MRR waterfall, expansion MRR, net revenue retention, and upcoming renewal activity.")
 
 subs_df = load_subscriptions()
 

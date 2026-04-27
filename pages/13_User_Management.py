@@ -78,6 +78,7 @@ require_permission("admin:manage_users")
 render_sync_sidebar()
 
 st.title("User Management")
+st.caption("Manage users, roles, permissions, and scheduled reports.")
 
 auth_db = get_auth_db()
 current_user = st.session_state.get("username", "")

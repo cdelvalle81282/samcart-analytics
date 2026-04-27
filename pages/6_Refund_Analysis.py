@@ -27,6 +27,7 @@ require_permission("page:refund_analysis")
 render_sync_sidebar()
 
 st.title("Refund Analysis")
+st.caption("Refund rates by product, time-to-refund distribution, and failed payment tracking.")
 
 charges_df = load_charges()
 orders_df = load_orders()

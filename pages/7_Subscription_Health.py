@@ -41,6 +41,7 @@ require_permission("page:subscription_health")
 render_sync_sidebar()
 
 st.title("Subscription Health")
+st.caption("Churn rates, trial-to-paid conversion, and subscription aging by product.")
 
 subs_df = load_subscriptions()
 

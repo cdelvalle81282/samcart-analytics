@@ -42,6 +42,7 @@ require_permission("page:product_deep_dive")
 render_sync_sidebar()
 
 st.title("Product Deep Dive")
+st.caption("MRR trends, cross-sell attach rates, and new vs renewal revenue mix by product.")
 
 subs_df = load_subscriptions()
 orders_df = load_orders()

@@ -36,6 +36,7 @@ require_permission("page:customer_segments")
 render_sync_sidebar()
 
 st.title("Customer Segments")
+st.caption("RFM segmentation, multi-product buyers, and revenue concentration across your customer base.")
 
 orders_df = load_orders()
 charges_df = load_charges()

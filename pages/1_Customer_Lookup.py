@@ -25,6 +25,7 @@ require_permission("page:customer_lookup")
 render_sync_sidebar()
 
 st.title("Customer Lookup")
+st.caption("Search by email or name — view purchase history, subscriptions, and lifetime value per customer.")
 
 # ------------------------------------------------------------------
 # PII access gate — non-admins need approved PII access

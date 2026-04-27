@@ -45,6 +45,7 @@ require_permission("page:daily_metrics")
 render_sync_sidebar()
 
 st.title("Daily Metrics")
+st.caption("New customers, sales, refunds, and renewals by product — day by day.")
 
 orders_df = load_orders()
 charges_df = load_charges()

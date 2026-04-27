@@ -11,6 +11,7 @@ require_permission("admin:audit_log")
 render_sync_sidebar()
 
 st.title("Audit Log")
+st.caption("User activity log — who accessed what and when.")
 
 cache = get_cache()
 

@@ -36,6 +36,7 @@ require_permission("page:cohorts")
 render_sync_sidebar()
 
 st.title("Cohort Performance Report")
+st.caption("Retention heatmap and renewal rates — see how subscriber cohorts stick month over month.")
 
 subs_df = load_subscriptions()
 
