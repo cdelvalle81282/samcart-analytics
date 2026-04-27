@@ -1425,8 +1425,8 @@ def mrr_waterfall(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
 
     subs["interval"] = subs["interval"].fillna("monthly")
     subs["price"] = subs["price"].fillna(0)
-    subs["monthly_price"] = subs.apply(
-        lambda r: _normalize_to_monthly(r["price"], r["interval"]), axis=1
+    subs["monthly_price"] = subs["price"] * (
+        subs["interval"].str.lower().str.strip().map(_INTERVAL_MONTHLY_FACTOR).fillna(1.0)
     )
     subs["created_month"] = subs["created_at"].dt.to_period("M")
     subs["canceled_month"] = subs["canceled_at"].dt.to_period("M")
@@ -1503,7 +1503,7 @@ def mrr_waterfall(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
             "month": str(month),
             "new_mrr": round(new_mrr, 2),
             "expansion_mrr": round(expansion_mrr, 2),
-            "contraction_mrr": 0.0,
+            "contraction_mrr": round(contraction_mrr, 2),
             "churned_mrr": round(churned_mrr, 2),
             "reactivation_mrr": round(reactivation_mrr, 2),
             "net_mrr": net_mrr,
@@ -1551,8 +1551,7 @@ def net_revenue_retention(charges_df: pd.DataFrame, subscriptions_df: pd.DataFra
         return pd.DataFrame(columns=_COLS)
 
     rows = []
-    for i, month in enumerate(months[1:], start=1):
-        prior_month = months[i - 1]
+    for prior_month, month in zip(months, months[1:]):
         prior = cust_monthly[cust_monthly["month_period"] == prior_month]
         current = cust_monthly[cust_monthly["month_period"] == month]
 
@@ -1998,7 +1997,7 @@ def trial_days_to_convert(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
     df = subscriptions_df.copy()
     df["trial_days"] = pd.to_numeric(df["trial_days"], errors="coerce").fillna(0).astype(int)
     df["billing_cycle_count"] = pd.to_numeric(
-        df.get("billing_cycle_count", 0), errors="coerce"
+        df.get("billing_cycle_count", pd.Series(dtype=float)), errors="coerce"
     ).fillna(0).astype(int)
 
     df = df[df["trial_days"] > 0].copy()
@@ -2079,8 +2078,8 @@ def arpu_by_product(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
 
     df["interval"] = df["interval"].fillna("monthly")
     df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
-    df["monthly_price"] = df.apply(
-        lambda r: _normalize_to_monthly(r["price"], r["interval"]), axis=1
+    df["monthly_price"] = df["price"] * (
+        df["interval"].str.lower().str.strip().map(_INTERVAL_MONTHLY_FACTOR).fillna(1.0)
     )
 
     result = (
@@ -2091,7 +2090,6 @@ def arpu_by_product(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
         )
         .reset_index()
     )
-    result = result[result["active_subscribers"] > 0].copy()
     result["monthly_arpu"] = (result["monthly_revenue"] / result["active_subscribers"]).round(2)
     result["annual_arpu"] = (result["monthly_arpu"] * 12).round(2)
     result = result.drop(columns=["monthly_revenue"])

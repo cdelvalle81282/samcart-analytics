@@ -156,35 +156,26 @@ with tab1:
         logger.exception("Failed to load upcoming renewals")
         upcoming = {"renewals": pd.DataFrame(), "cancellations": pd.DataFrame()}
 
+    def _show_upcoming(df: pd.DataFrame, empty_msg: str) -> None:
+        if df.empty:
+            st.info(empty_msg)
+            return
+        cols = ["product_name", "price", "days_until"]
+        if _can_see_pii and "customer_email" in df.columns:
+            cols = ["customer_email"] + cols
+        st.dataframe(
+            df[[c for c in cols if c in df.columns]],
+            column_config={"price": st.column_config.NumberColumn("Price", format="$%.2f")},
+            use_container_width=True,
+        )
+
     uc1, uc2 = st.columns(2)
     with uc1:
         st.markdown("**Renewals**")
-        r_df = upcoming.get("renewals", pd.DataFrame())
-        if r_df.empty:
-            st.info("No renewals scheduled in this window.")
-        else:
-            _rcols = ["product_name", "price", "days_until"]
-            if _can_see_pii and "customer_email" in r_df.columns:
-                _rcols = ["customer_email"] + _rcols
-            st.dataframe(
-                r_df[[c for c in _rcols if c in r_df.columns]],
-                column_config={"price": st.column_config.NumberColumn("Price", format="$%.2f")},
-                use_container_width=True,
-            )
+        _show_upcoming(upcoming.get("renewals", pd.DataFrame()), "No renewals scheduled in this window.")
     with uc2:
         st.markdown("**Cancellations**")
-        c_df = upcoming.get("cancellations", pd.DataFrame())
-        if c_df.empty:
-            st.info("No cancellations scheduled in this window.")
-        else:
-            _ccols = ["product_name", "price", "days_until"]
-            if _can_see_pii and "customer_email" in c_df.columns:
-                _ccols = ["customer_email"] + _ccols
-            st.dataframe(
-                c_df[[c for c in _ccols if c in c_df.columns]],
-                column_config={"price": st.column_config.NumberColumn("Price", format="$%.2f")},
-                use_container_width=True,
-            )
+        _show_upcoming(upcoming.get("cancellations", pd.DataFrame()), "No cancellations scheduled in this window.")
 
 # --- Tab 2: Revenue Forecast ---
 with tab2:

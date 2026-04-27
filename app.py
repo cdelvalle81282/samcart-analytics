@@ -22,6 +22,27 @@ from version import LAST_UPDATED, VERSION
 
 logger = logging.getLogger(__name__)
 
+
+@st.cache_data(ttl=300)
+def _cached_nrr(charges_df, subs_df):
+    return net_revenue_retention(charges_df, subs_df)
+
+
+@st.cache_data(ttl=300)
+def _cached_arpu(subs_df):
+    return arpu_by_product(subs_df)
+
+
+@st.cache_data(ttl=300)
+def _cached_concentration(charges_df):
+    return customer_concentration(charges_df)
+
+
+@st.cache_data(ttl=300)
+def _cached_monthly_revenue(orders_df, charges_df):
+    return monthly_revenue_summary(orders_df, charges_df)
+
+
 st.set_page_config(
     page_title="SamCart Analytics",
     page_icon=":bar_chart:",
@@ -82,7 +103,7 @@ if not subs_df.empty:
     churn_rate = canceled / total_subs * 100 if total_subs > 0 else 0
 
 # Monthly revenue summary — used for chart AND revenue delta
-monthly = monthly_revenue_summary(orders_df, charges_df)
+monthly = _cached_monthly_revenue(orders_df, charges_df)
 
 # Revenue delta MoM
 revenue_delta = None
@@ -104,7 +125,7 @@ if not customers_df.empty and "created_at" in customers_df.columns:
 # NRR — latest month
 nrr_str = "N/A"
 try:
-    nrr_df = net_revenue_retention(charges_df, subs_df)
+    nrr_df = _cached_nrr(charges_df, subs_df)
     if not nrr_df.empty:
         _v = nrr_df.iloc[-1]["nrr_pct"]
         if pd.notna(_v):
@@ -115,7 +136,7 @@ except Exception:
 # Weighted ARPU across all active subscribers
 avg_arpu = 0.0
 try:
-    arpu_df = arpu_by_product(subs_df)
+    arpu_df = _cached_arpu(subs_df)
     if not arpu_df.empty:
         _total_subs = arpu_df["active_subscribers"].sum()
         if _total_subs > 0:
@@ -128,7 +149,7 @@ except Exception:
 # Revenue concentration — top 10 customers
 top10_pct_str = "N/A"
 try:
-    conc_df = customer_concentration(charges_df)
+    conc_df = _cached_concentration(charges_df)
     if not conc_df.empty:
         _n = min(10, len(conc_df))
         top10_pct_str = f"{conc_df.iloc[_n - 1]['cumulative_pct']:.1f}%"
