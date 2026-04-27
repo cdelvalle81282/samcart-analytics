@@ -329,27 +329,27 @@ with tab6:
     if selected_products:
         ltv_df = ltv_df[ltv_df["product_name"].isin(selected_products)]
 
-    # Products that survived the entry price slider — used to sync the progression chart.
+    # Products that survived the price tier filter — used to sync the progression chart.
     # Tracked separately so prog_df is never restricted by ltv_df's maturity cutoff.
     _ep_price_products: set[str] | None = None
     if not ltv_df.empty and "avg_entry_price" in ltv_df.columns:
-        _ep_min = float(ltv_df["avg_entry_price"].min())
-        _ep_max = float(ltv_df["avg_entry_price"].max())
-        if _ep_min < _ep_max:
-            # Key includes window + products so the slider resets when the cohort changes
-            _ep_key = f"ltv_entry_price_filter_{_chosen_window}_{'_'.join(sorted(selected_products or []))}"
-            _ep_range = st.slider(
-                "Filter by avg entry price ($)",
-                min_value=_ep_min,
-                max_value=_ep_max,
-                value=(_ep_min, _ep_max),
-                format="$%.0f",
-                key=_ep_key,
+        _PRICE_TIERS = {"All prices": None, "$49 and under": 49, "$99 and under": 99}
+        # Only show tiers that have at least one product in range
+        _available_tiers = [
+            label for label, cap in _PRICE_TIERS.items()
+            if cap is None or (ltv_df["avg_entry_price"] <= cap).any()
+        ]
+        if len(_available_tiers) > 1:
+            _tier_key = f"ltv_price_tier_{_chosen_window}_{'_'.join(sorted(selected_products or []))}"
+            _selected_tier = st.radio(
+                "Entry price tier",
+                options=_available_tiers,
+                horizontal=True,
+                key=_tier_key,
             )
-            ltv_df = ltv_df[
-                (ltv_df["avg_entry_price"] >= _ep_range[0])
-                & (ltv_df["avg_entry_price"] <= _ep_range[1])
-            ]
+            _tier_cap = _PRICE_TIERS[_selected_tier]
+            if _tier_cap is not None:
+                ltv_df = ltv_df[ltv_df["avg_entry_price"] <= _tier_cap]
             _ep_price_products = set(ltv_df["product_name"])
 
     if not ltv_df.empty:
