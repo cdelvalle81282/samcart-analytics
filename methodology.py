@@ -353,11 +353,20 @@ MRR_WATERFALL_METHODOLOGY = """
 **Churned MRR**
 - Subscriptions whose `canceled_at` falls in this month
 
-**Net MRR**
-- Formula: `new_mrr + reactivation_mrr - churned_mrr`
+**Expansion MRR**
+- New subscriptions created this month for a customer who already has an active subscription to a *different* product at the time of creation
+- Captures cross-sell growth from the existing subscriber base
 
-**Limitations**
-- Expansion/contraction MRR not tracked (SamCart doesn't surface price changes on existing subs)
+**Contraction MRR**
+- Always zero — SamCart doesn't surface plan downgrades or price reductions on existing subscriptions
+
+**Net MRR**
+- Formula: `new_mrr + expansion_mrr + reactivation_mrr - churned_mrr`
+
+**Quick Ratio**
+- Formula: `(new_mrr + expansion_mrr + reactivation_mrr) / churned_mrr`
+- Shows growth efficiency: >1 means revenue is growing; >4 is considered strong
+- Displayed as N/A when churned_mrr = 0 (no churn that month)
 """
 
 REVENUE_FORECAST_METHODOLOGY = """
@@ -547,4 +556,51 @@ REVENUE_MIX_METHODOLOGY = """
 **Percentages**
 - `new_pct` = new_revenue / total_revenue × 100
 - `renewal_pct` = renewal_revenue / total_revenue × 100
+"""
+
+NRR_METHODOLOGY = """
+### How Net Revenue Retention (NRR) Is Calculated
+
+**Definition**
+- NRR measures how much revenue is retained from the existing subscriber base month-over-month
+- Formula: `ending_mrr / starting_mrr × 100`
+- >100% means subscriber revenue is growing even without new customers (expansion outweighs churn)
+
+**Cohort Definition**
+- "Existing customers" for month M = customers who had at least one collected subscription charge in month M-1
+- Excludes one-time orders (subscription_id must be present)
+
+**Starting MRR**
+- Net subscription charge revenue from the prior-month cohort in month M-1
+
+**Ending MRR**
+- Net subscription charge revenue from those same prior-month customers in month M
+- Customers who churned contribute $0; customers who expanded contribute their full revenue
+
+**Limitations**
+- Requires at least 2 months of charge data; the first month is always excluded
+- NaN is returned for any month where the prior-month cohort had zero net revenue
+- Based on actual charges, not subscription list prices — captures real cash flows including partial refunds
+"""
+
+FAILED_PAYMENT_METHODOLOGY = """
+### How Failed Payments Are Calculated
+
+**Failed Charge Definition**
+- A charge is "failed" if its status is non-empty AND is not in the successful set AND is not in the refund set
+- Successful statuses: NULL/empty, "charged", "succeeded", "paid", "complete"
+- Refund statuses: "refunded", "partially_refunded", "refund"
+- Failed examples: "failed", "declined", "error" — exact strings depend on SamCart's payment processor
+
+**Failure Rate**
+- Formula: `failed_count / total_charge_count × 100` per month or product
+- Denominator includes all charge attempts (successful + refund + failed)
+
+**Amount**
+- Sum of the attempted charge amount for failed charges
+- Represents revenue that was attempted but not collected (involuntary churn candidate)
+
+**Note**
+- Failed charges are distinct from refunds. A refund was collected and then returned. A failed charge was never collected.
+- Industry benchmarks: 5–10% failure rate is typical; above 15% warrants dunning process review.
 """

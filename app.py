@@ -2,10 +2,17 @@
 
 import logging
 
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from analytics import monthly_revenue_summary, total_net_revenue
+from analytics import (
+    arpu_by_product,
+    customer_concentration,
+    monthly_revenue_summary,
+    net_revenue_retention,
+    total_net_revenue,
+)
 from auth import is_admin, require_auth
 from pii_access import check_pii_access
 from export import cleanup_old_exports
@@ -56,7 +63,7 @@ if orders_df.empty and subs_df.empty:
     st.stop()
 
 # ------------------------------------------------------------------
-# Metric row — all 5 KPIs in one line
+# Pre-compute all metric values
 # ------------------------------------------------------------------
 
 total_revenue = total_net_revenue(charges_df, orders_df)
@@ -74,12 +81,109 @@ if not subs_df.empty:
     canceled = subs_df[subs_df["status"].str.lower().isin(["canceled", "cancelled"])]["id"].nunique()
     churn_rate = canceled / total_subs * 100 if total_subs > 0 else 0
 
-col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("Total Revenue", f"${total_revenue:,.2f}")
-col2.metric("Total Customers", f"{total_customers:,}")
-col3.metric("Active Subscriptions", f"{active_subs:,}")
-col4.metric("Avg Order Value", f"${avg_order:,.2f}")
-col5.metric("Overall Churn Rate", f"{churn_rate:.1f}%")
+# Monthly revenue summary — used for chart AND revenue delta
+monthly = monthly_revenue_summary(orders_df, charges_df)
+
+# Revenue delta MoM
+revenue_delta = None
+if len(monthly) >= 2:
+    revenue_delta = float(monthly.iloc[-1]["total_revenue"] - monthly.iloc[-2]["total_revenue"])
+
+# New customers delta MoM
+customers_delta = None
+if not customers_df.empty and "created_at" in customers_df.columns:
+    _cdf = customers_df.copy()
+    _cdf["created_at"] = pd.to_datetime(_cdf["created_at"], errors="coerce", utc=True)
+    _cdf = _cdf.dropna(subset=["created_at"])
+    if not _cdf.empty:
+        _cdf["month"] = _cdf["created_at"].dt.to_period("M")
+        _counts = _cdf.groupby("month").size().sort_index()
+        if len(_counts) >= 2:
+            customers_delta = int(_counts.iloc[-1] - _counts.iloc[-2])
+
+# NRR — latest month
+nrr_str = "N/A"
+try:
+    nrr_df = net_revenue_retention(charges_df, subs_df)
+    if not nrr_df.empty:
+        _v = nrr_df.iloc[-1]["nrr_pct"]
+        if pd.notna(_v):
+            nrr_str = f"{_v:.1f}%"
+except Exception:
+    logger.exception("NRR computation failed on Overview")
+
+# Weighted ARPU across all active subscribers
+avg_arpu = 0.0
+try:
+    arpu_df = arpu_by_product(subs_df)
+    if not arpu_df.empty:
+        _total_subs = arpu_df["active_subscribers"].sum()
+        if _total_subs > 0:
+            avg_arpu = float(
+                (arpu_df["monthly_arpu"] * arpu_df["active_subscribers"]).sum() / _total_subs
+            )
+except Exception:
+    logger.exception("ARPU computation failed on Overview")
+
+# Revenue concentration — top 10 customers
+top10_pct_str = "N/A"
+try:
+    conc_df = customer_concentration(charges_df)
+    if not conc_df.empty:
+        _n = min(10, len(conc_df))
+        top10_pct_str = f"{conc_df.iloc[_n - 1]['cumulative_pct']:.1f}%"
+except Exception:
+    logger.exception("Concentration computation failed on Overview")
+
+# ------------------------------------------------------------------
+# Metric cards — 2 rows of 4
+# ------------------------------------------------------------------
+
+r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+
+r1c1.metric(
+    "Total Revenue",
+    f"${total_revenue:,.2f}",
+    delta=f"${revenue_delta:+,.0f} MoM" if revenue_delta is not None else None,
+    help="Net revenue from collected charges minus partial refunds.",
+)
+r1c2.metric(
+    "Total Customers",
+    f"{total_customers:,}",
+    delta=f"{customers_delta:+,} MoM" if customers_delta is not None else None,
+    help="Distinct customer records synced from SamCart.",
+)
+r1c3.metric(
+    "Active Subscriptions",
+    f"{active_subs:,}",
+    help="Subscriptions currently in 'active' status.",
+)
+r1c4.metric(
+    "Avg Order Value",
+    f"${avg_order:,.2f}",
+    help="Mean order total across all orders.",
+)
+r2c1.metric(
+    "Churn Rate",
+    f"{churn_rate:.1f}%",
+    help="Lifetime canceled subscriptions / total subscriptions.",
+)
+r2c2.metric(
+    "Net Revenue Retention",
+    nrr_str,
+    help="Last month's subscription revenue retained from prior-month customers, as a % of their prior-month revenue. >100% = growing without new customers.",
+)
+r2c3.metric(
+    "Avg Monthly ARPU",
+    f"${avg_arpu:,.2f}",
+    help="Weighted average monthly revenue per active subscriber across all products.",
+)
+r2c4.metric(
+    "Top 10 Concentration",
+    top10_pct_str,
+    help="Share of total customer revenue earned by your top 10 customers.",
+)
 
 st.markdown("")
 
@@ -88,7 +192,6 @@ st.markdown("")
 # ------------------------------------------------------------------
 
 st.subheader("Monthly Revenue")
-monthly = monthly_revenue_summary(orders_df, charges_df)
 if not monthly.empty:
     fig = px.bar(
         monthly,

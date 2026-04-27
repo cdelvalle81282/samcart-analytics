@@ -3,7 +3,7 @@
 import plotly.express as px
 import streamlit as st
 
-from analytics import churn_analysis, subscription_aging, trial_conversion
+from analytics import churn_analysis, subscription_aging, trial_conversion, trial_days_to_convert
 from auth import require_auth, require_permission
 from export import render_export_buttons
 from methodology import (
@@ -28,6 +28,11 @@ def _cached_trial_conversion():
 @st.cache_data(ttl=300)
 def _cached_subscription_aging():
     return subscription_aging(load_subscriptions())
+
+
+@st.cache_data(ttl=300)
+def _cached_trial_days_to_convert():
+    return trial_days_to_convert(load_subscriptions())
 
 
 st.set_page_config(page_title="Subscription Health", page_icon=":heartbeat:", layout="wide")
@@ -148,6 +153,29 @@ with tab2:
             use_container_width=True,
         )
         render_export_buttons(trial_df, "trial_conversion", key_prefix="trial_conv")
+
+        # Trial length distribution
+        td_df = _cached_trial_days_to_convert()
+        if not td_df.empty:
+            st.subheader("Trial Length Distribution")
+            st.caption("How long trials were for converted vs. dropped subscribers.")
+            fig_td = px.histogram(
+                td_df,
+                x="trial_days",
+                y="customer_count",
+                color="outcome",
+                barmode="group",
+                histfunc="sum",
+                color_discrete_map={"converted": "#10B981", "dropped": "#EF4444"},
+                labels={
+                    "trial_days": "Trial Days",
+                    "customer_count": "Customers",
+                    "outcome": "Outcome",
+                },
+            )
+            st.plotly_chart(fig_td, use_container_width=True)
+        else:
+            st.info("No trial-length distribution data available. Requires a full sync with trial_days populated.")
 
     render_automate_button("subscription_health_trial", "Subscription Health — Trial-to-Paid", "No filters")
     st.markdown("---")

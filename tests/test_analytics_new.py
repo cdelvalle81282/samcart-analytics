@@ -1,17 +1,21 @@
 """Tests for the 12 new analytics functions and updated helpers."""
 
 import pandas as pd
+import pytest
 
 from analytics import (
     _is_collected_charge,
     _is_gross_charge,
     _net_charge_amount,
     _normalize_to_monthly,
+    arpu_by_product,
     churn_analysis,
     customer_concentration,
     daily_refunds,
+    failed_payment_analysis,
     mrr_waterfall,
     multi_product_buyers,
+    net_revenue_retention,
     new_vs_renewal_revenue_mix,
     product_attach_rate,
     product_mrr_trend,
@@ -20,6 +24,7 @@ from analytics import (
     rfm_segmentation,
     subscription_aging,
     trial_conversion,
+    trial_days_to_convert,
 )
 
 
@@ -588,3 +593,335 @@ class TestSubscriptionAgingZeroDay:
         bucket_0_30 = result[result["age_bucket"] == "0-30d"]
         assert not bucket_0_30.empty
         assert bucket_0_30.iloc[0]["count"] == 1
+
+
+# ------------------------------------------------------------------
+# New analytics function tests
+# ------------------------------------------------------------------
+
+
+def _charges_df(rows):
+    """Build a charges DataFrame from a list of dict rows with sane defaults."""
+    defaults = {
+        "id": "c?",
+        "order_id": "o?",
+        "subscription_id": "s1",
+        "customer_email": "x@t.com",
+        "amount": 0.0,
+        "status": "",
+        "created_at": "2026-01-15T10:00:00Z",
+        "refund_amount": 0.0,
+        "refund_date": None,
+    }
+    out = []
+    for i, r in enumerate(rows):
+        merged = {**defaults, **r}
+        if merged["id"] == "c?":
+            merged["id"] = f"c{i}"
+        if merged["order_id"] == "o?":
+            merged["order_id"] = f"o{i}"
+        out.append(merged)
+    return pd.DataFrame(out)
+
+
+class TestNRR:
+    def test_empty_charges(self):
+        result = net_revenue_retention(pd.DataFrame(), pd.DataFrame())
+        assert result.empty
+        assert list(result.columns) == ["month", "nrr_pct", "starting_mrr", "ending_mrr"]
+
+    def test_single_month_returns_empty(self):
+        # Only one month of data — no prior period, so NRR cannot be computed
+        charges = _charges_df([
+            {"subscription_id": "sub1", "status": "charged", "amount": 100.0,
+             "created_at": "2026-01-15T10:00:00Z", "customer_email": "a@test.com"},
+            {"subscription_id": "sub1", "status": "charged", "amount": 50.0,
+             "created_at": "2026-01-20T10:00:00Z", "customer_email": "b@test.com"},
+        ])
+        result = net_revenue_retention(charges, pd.DataFrame())
+        assert result.empty
+
+    def test_basic_retention(self):
+        # Customer A: $100 in Jan + $80 in Feb; Customer B: $50 in Jan only (churned)
+        # starting = 150, ending = 80 (only A in both months), nrr = 80/150*100 = 53.33%
+        charges = _make_charges(
+            subscription_id=["s1", "s2", "s1"],
+            status=["charged", "charged", "charged"],
+            amount=[100.0, 50.0, 80.0],
+            refund_amount=[0.0, 0.0, 0.0],
+            created_at=[
+                "2026-01-15T10:00:00Z",
+                "2026-01-20T10:00:00Z",
+                "2026-02-15T10:00:00Z",
+            ],
+            customer_email=["a@test.com", "b@test.com", "a@test.com"],
+        )
+        result = net_revenue_retention(charges, pd.DataFrame())
+        assert not result.empty
+        assert len(result) == 1
+        row = result.iloc[0]
+        assert row["month"] == "2026-02"
+        assert abs(row["starting_mrr"] - 150.0) < 0.01
+        assert abs(row["ending_mrr"] - 80.0) < 0.01
+        assert abs(row["nrr_pct"] - 53.33) < 0.1
+
+    def test_excludes_new_customers_from_ending(self):
+        # Customer C only appears in Feb — should NOT inflate ending_mrr
+        charges = _make_charges(
+            subscription_id=["s1", "s1", "s3"],
+            status=["charged", "charged", "charged"],
+            amount=[100.0, 100.0, 200.0],
+            refund_amount=[0.0, 0.0, 0.0],
+            created_at=[
+                "2026-01-15T10:00:00Z",
+                "2026-02-15T10:00:00Z",
+                "2026-02-20T10:00:00Z",
+            ],
+            customer_email=["a@test.com", "a@test.com", "c@test.com"],
+        )
+        result = net_revenue_retention(charges, pd.DataFrame())
+        assert not result.empty
+        row = result.iloc[0]
+        # ending should only count customer A ($100), not C ($200)
+        assert abs(row["ending_mrr"] - 100.0) < 0.01
+        assert abs(row["nrr_pct"] - 100.0) < 0.1
+
+    def test_zero_prior_cohort_returns_nan(self):
+        # Prior month has only refunded charges (filtered out by _is_collected_charge)
+        # → only one month of collected charges remains → returns empty
+        charges = _charges_df([
+            {"subscription_id": "s1", "status": "refunded", "amount": 100.0,
+             "refund_amount": 100.0, "created_at": "2026-01-15T10:00:00Z",
+             "customer_email": "a@test.com"},
+            {"subscription_id": "s1", "status": "charged", "amount": 80.0,
+             "refund_amount": 0.0, "created_at": "2026-02-15T10:00:00Z",
+             "customer_email": "a@test.com"},
+        ])
+        result = net_revenue_retention(charges, pd.DataFrame())
+        if not result.empty:
+            assert pd.isna(result.iloc[0]["nrr_pct"])
+
+
+class TestMRRWaterfallExpansion:
+    def test_columns_present(self):
+        result = mrr_waterfall(_make_subscriptions())
+        expected_cols = {
+            "month", "new_mrr", "expansion_mrr", "contraction_mrr",
+            "churned_mrr", "reactivation_mrr", "net_mrr", "quick_ratio",
+        }
+        assert expected_cols.issubset(set(result.columns))
+
+    def test_contraction_always_zero(self):
+        result = mrr_waterfall(_make_subscriptions())
+        assert (result["contraction_mrr"] == 0.0).all()
+
+    def test_net_mrr_invariant(self):
+        result = mrr_waterfall(_make_subscriptions())
+        computed = (
+            result["new_mrr"] + result["expansion_mrr"] + result["reactivation_mrr"]
+            - result["churned_mrr"] - result["contraction_mrr"]
+        ).round(2)
+        assert (computed == result["net_mrr"].round(2)).all()
+
+    def test_quick_ratio_nan_when_no_churn(self):
+        # A subscription with no cancellations → churned_mrr = 0 → quick_ratio NaN
+        subs = pd.DataFrame([{
+            "id": "s1", "customer_email": "a@test.com", "product_id": "p1",
+            "product_name": "Prod A", "status": "active", "interval": "monthly",
+            "price": 50.0, "created_at": pd.Timestamp("2026-01-15", tz="UTC"),
+            "canceled_at": pd.NaT, "trial_days": 0, "next_bill_date": pd.NaT,
+            "billing_cycle_count": 2,
+        }])
+        result = mrr_waterfall(subs)
+        assert not result.empty
+        # All months should have NaN quick_ratio (no churn ever)
+        assert result["quick_ratio"].isna().all()
+
+    def test_expansion_classification(self):
+        # Customer has Product A sub active; then creates Product B sub same month
+        # Product B should go to expansion_mrr, not new_mrr
+        subs = pd.DataFrame([
+            {
+                "id": "s1", "customer_email": "a@test.com", "product_id": "pA",
+                "product_name": "Prod A", "status": "active", "interval": "monthly",
+                "price": 40.0, "created_at": pd.Timestamp("2026-01-10", tz="UTC"),
+                "canceled_at": pd.NaT, "trial_days": 0, "next_bill_date": pd.NaT,
+                "billing_cycle_count": 3,
+            },
+            {
+                "id": "s2", "customer_email": "a@test.com", "product_id": "pB",
+                "product_name": "Prod B", "status": "active", "interval": "monthly",
+                "price": 30.0, "created_at": pd.Timestamp("2026-02-05", tz="UTC"),
+                "canceled_at": pd.NaT, "trial_days": 0, "next_bill_date": pd.NaT,
+                "billing_cycle_count": 1,
+            },
+        ])
+        result = mrr_waterfall(subs)
+        # Feb row: expansion_mrr should be 30, new_mrr for pB contribution = 0
+        feb = result[result["month"] == "2026-02"]
+        assert not feb.empty
+        assert feb.iloc[0]["expansion_mrr"] == pytest.approx(30.0, abs=0.01)
+        # new_mrr in Feb should be 0 (pB is expansion, no truly new customers)
+        assert feb.iloc[0]["new_mrr"] == pytest.approx(0.0, abs=0.01)
+
+
+class TestArpuByProduct:
+    def test_empty(self):
+        result = arpu_by_product(pd.DataFrame())
+        assert result.empty
+        assert "monthly_arpu" in result.columns
+
+    def test_no_active_subs(self):
+        subs = _make_subscriptions()
+        subs["status"] = "canceled"
+        result = arpu_by_product(subs)
+        assert result.empty
+
+    def test_basic_monthly(self):
+        # 3 active subs at $30/mo, 2 unique customers (a@t.com appears twice)
+        # revenues = 90, unique customers = 2, monthly_arpu = 90/2 = 45
+        subs = pd.DataFrame([
+            {"id": "s1", "customer_email": "a@t.com", "product_id": "p1",
+             "product_name": "Prod X", "status": "active", "interval": "monthly",
+             "price": 30.0, "created_at": pd.Timestamp("2026-01-01", tz="UTC"),
+             "canceled_at": pd.NaT, "trial_days": 0, "next_bill_date": pd.NaT,
+             "billing_cycle_count": 1},
+            {"id": "s2", "customer_email": "b@t.com", "product_id": "p1",
+             "product_name": "Prod X", "status": "active", "interval": "monthly",
+             "price": 30.0, "created_at": pd.Timestamp("2026-01-01", tz="UTC"),
+             "canceled_at": pd.NaT, "trial_days": 0, "next_bill_date": pd.NaT,
+             "billing_cycle_count": 1},
+            {"id": "s3", "customer_email": "a@t.com", "product_id": "p1",
+             "product_name": "Prod X", "status": "active", "interval": "monthly",
+             "price": 30.0, "created_at": pd.Timestamp("2026-02-01", tz="UTC"),
+             "canceled_at": pd.NaT, "trial_days": 0, "next_bill_date": pd.NaT,
+             "billing_cycle_count": 1},
+        ])
+        result = arpu_by_product(subs)
+        assert not result.empty
+        row = result[result["product_id"] == "p1"].iloc[0]
+        assert row["active_subscribers"] == 2
+        assert row["monthly_arpu"] == pytest.approx(45.0, abs=0.01)
+        assert row["annual_arpu"] == pytest.approx(540.0, abs=0.01)
+
+    def test_yearly_normalized(self):
+        # Yearly $1200 sub → $100/mo contribution
+        subs = pd.DataFrame([{
+            "id": "s1", "customer_email": "a@t.com", "product_id": "p1",
+            "product_name": "Prod Y", "status": "active", "interval": "yearly",
+            "price": 1200.0, "created_at": pd.Timestamp("2026-01-01", tz="UTC"),
+            "canceled_at": pd.NaT, "trial_days": 0, "next_bill_date": pd.NaT,
+            "billing_cycle_count": 1,
+        }])
+        result = arpu_by_product(subs)
+        assert not result.empty
+        assert result.iloc[0]["monthly_arpu"] == pytest.approx(100.0, abs=0.01)
+
+
+class TestFailedPayments:
+    def test_empty_charges(self):
+        by_month, by_product = failed_payment_analysis(
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        )
+        assert by_month.empty
+        assert by_product.empty
+        assert "failed_count" in by_month.columns
+        assert "failed_count" in by_product.columns
+
+    def test_no_failed_charges(self):
+        charges = _charges_df([
+            {"status": "charged", "amount": 100.0, "created_at": "2026-01-15T10:00:00Z"},
+            {"status": "charged", "amount": 50.0, "created_at": "2026-01-20T10:00:00Z"},
+        ])
+        by_month, _ = failed_payment_analysis(charges, pd.DataFrame(), pd.DataFrame())
+        assert not by_month.empty
+        assert by_month["failed_count"].sum() == 0
+        assert by_month["failure_rate_pct"].sum() == 0.0
+
+    def test_failed_classification(self):
+        # "declined" = failed; NULL = successful (not failed)
+        charges = _make_charges(
+            status=["declined", None, "charged"],
+            amount=[99.0, 49.0, 79.0],
+            created_at=[
+                "2026-01-10T10:00:00Z",
+                "2026-01-11T10:00:00Z",
+                "2026-01-12T10:00:00Z",
+            ],
+        )
+        by_month, _ = failed_payment_analysis(charges, pd.DataFrame(), pd.DataFrame())
+        assert not by_month.empty
+        assert by_month["failed_count"].sum() == 1
+        assert abs(by_month["failed_amount"].sum() - 99.0) < 0.01
+
+    def test_amount_none_no_crash(self):
+        # Failed charge with None amount should not crash and contribute 0 to failed_amount
+        charges = _charges_df([
+            {"status": "failed", "amount": None, "created_at": "2026-01-10T10:00:00Z"},
+        ])
+        by_month, _ = failed_payment_analysis(charges, pd.DataFrame(), pd.DataFrame())
+        assert not by_month.empty
+        assert by_month["failed_count"].sum() == 1
+        assert by_month["failed_amount"].sum() == 0.0
+
+
+class TestTrialDaysToConvert:
+    def test_empty(self):
+        result = trial_days_to_convert(pd.DataFrame())
+        assert result.empty
+        assert "outcome" in result.columns
+
+    def test_no_trial_column(self):
+        subs = _make_subscriptions()
+        if "trial_days" in subs.columns:
+            subs = subs.drop(columns=["trial_days"])
+        result = trial_days_to_convert(subs)
+        assert result.empty
+
+    def test_zero_trial_days_excluded(self):
+        subs = _make_subscriptions()
+        subs["trial_days"] = 0
+        result = trial_days_to_convert(subs)
+        assert result.empty
+
+    def test_basic_distribution(self):
+        subs = pd.DataFrame([
+            # 3 converted at 14 days
+            {"id": "s1", "customer_email": "a@t.com", "product_id": "p1",
+             "product_name": "Prod A", "status": "active", "interval": "monthly",
+             "price": 30.0, "trial_days": 14, "billing_cycle_count": 2,
+             "created_at": pd.Timestamp("2026-01-01", tz="UTC"),
+             "canceled_at": pd.NaT, "next_bill_date": pd.NaT},
+            {"id": "s2", "customer_email": "b@t.com", "product_id": "p1",
+             "product_name": "Prod A", "status": "active", "interval": "monthly",
+             "price": 30.0, "trial_days": 14, "billing_cycle_count": 1,
+             "created_at": pd.Timestamp("2026-01-01", tz="UTC"),
+             "canceled_at": pd.NaT, "next_bill_date": pd.NaT},
+            {"id": "s3", "customer_email": "c@t.com", "product_id": "p1",
+             "product_name": "Prod A", "status": "active", "interval": "monthly",
+             "price": 30.0, "trial_days": 14, "billing_cycle_count": 3,
+             "created_at": pd.Timestamp("2026-01-01", tz="UTC"),
+             "canceled_at": pd.NaT, "next_bill_date": pd.NaT},
+            # 2 dropped at 7 days
+            {"id": "s4", "customer_email": "d@t.com", "product_id": "p1",
+             "product_name": "Prod A", "status": "canceled", "interval": "monthly",
+             "price": 30.0, "trial_days": 7, "billing_cycle_count": 0,
+             "created_at": pd.Timestamp("2026-01-01", tz="UTC"),
+             "canceled_at": pd.Timestamp("2026-01-08", tz="UTC"),
+             "next_bill_date": pd.NaT},
+            {"id": "s5", "customer_email": "e@t.com", "product_id": "p1",
+             "product_name": "Prod A", "status": "cancelled", "interval": "monthly",
+             "price": 30.0, "trial_days": 7, "billing_cycle_count": 0,
+             "created_at": pd.Timestamp("2026-01-01", tz="UTC"),
+             "canceled_at": pd.Timestamp("2026-01-08", tz="UTC"),
+             "next_bill_date": pd.NaT},
+        ])
+        result = trial_days_to_convert(subs)
+        assert not result.empty
+        assert set(result["outcome"].unique()) == {"converted", "dropped"}
+        converted_row = result[result["outcome"] == "converted"]
+        assert not converted_row.empty
+        assert converted_row.iloc[0]["customer_count"] == 3
+        dropped_row = result[result["outcome"] == "dropped"]
+        assert not dropped_row.empty
+        assert dropped_row.iloc[0]["customer_count"] == 2

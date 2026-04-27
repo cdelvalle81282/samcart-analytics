@@ -1404,11 +1404,15 @@ def _normalize_to_monthly(price: float, interval: str) -> float:
 
 def mrr_waterfall(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Monthly MRR waterfall: new, churned, reactivation, net MRR.
+    Monthly MRR waterfall: new, expansion, contraction, churned, reactivation, net MRR.
 
-    Returns: month, new_mrr, churned_mrr, reactivation_mrr, net_mrr
+    Returns: month, new_mrr, expansion_mrr, contraction_mrr, churned_mrr,
+    reactivation_mrr, net_mrr, quick_ratio
     """
-    cols = ["month", "new_mrr", "churned_mrr", "reactivation_mrr", "net_mrr"]
+    cols = [
+        "month", "new_mrr", "churned_mrr", "reactivation_mrr", "net_mrr",
+        "expansion_mrr", "contraction_mrr", "quick_ratio",
+    ]
     if subscriptions_df.empty:
         return pd.DataFrame(columns=cols)
 
@@ -1440,8 +1444,10 @@ def mrr_waterfall(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
         new_mrr = 0.0
         reactivation_mrr = 0.0
         churned_mrr = 0.0
+        expansion_mrr = 0.0
+        contraction_mrr = 0.0
 
-        # New / reactivation subs created this month
+        # New / reactivation / expansion subs created this month
         created_this = subs[subs["created_month"] == month]
         for _, sub in created_this.iterrows():
             email = sub["customer_email"]
@@ -1452,6 +1458,7 @@ def mrr_waterfall(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
                 & (canceled_subs["product_id"] == pid)
                 & (canceled_subs["canceled_at"] < sub["created_at"])
             ]
+            is_reactivation = False
             if not prior_canceled.empty:
                 # Check if there's an active sub at this point (concurrent)
                 active_at_start = subs[
@@ -1463,24 +1470,106 @@ def mrr_waterfall(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
                 ]
                 if active_at_start.empty:
                     reactivation_mrr += sub["monthly_price"]
+                    is_reactivation = True
+
+            if not is_reactivation:
+                # Expansion: customer has a different-product active sub at moment of creation
+                others = subs[
+                    (subs["customer_email"] == email)
+                    & (subs["product_id"] != pid)
+                    & (subs["created_at"] < sub["created_at"])
+                    & (subs["canceled_at"].isna() | (subs["canceled_at"] >= sub["created_at"]))
+                ]
+                if not others.empty:
+                    expansion_mrr += sub["monthly_price"]
                 else:
                     new_mrr += sub["monthly_price"]
-            else:
-                new_mrr += sub["monthly_price"]
 
         # Churned this month
         churned_this = subs[subs["canceled_month"] == month]
         churned_mrr = churned_this["monthly_price"].sum()
 
+        net_mrr = round(
+            new_mrr + expansion_mrr + reactivation_mrr - churned_mrr - contraction_mrr,
+            2,
+        )
+        quick_ratio = (
+            round((new_mrr + expansion_mrr + reactivation_mrr) / churned_mrr, 2)
+            if churned_mrr > 0
+            else float("nan")
+        )
+
         rows.append({
             "month": str(month),
             "new_mrr": round(new_mrr, 2),
+            "expansion_mrr": round(expansion_mrr, 2),
+            "contraction_mrr": 0.0,
             "churned_mrr": round(churned_mrr, 2),
             "reactivation_mrr": round(reactivation_mrr, 2),
-            "net_mrr": round(new_mrr + reactivation_mrr - churned_mrr, 2),
+            "net_mrr": net_mrr,
+            "quick_ratio": quick_ratio,
         })
 
     return pd.DataFrame(rows, columns=cols)
+
+
+def net_revenue_retention(charges_df: pd.DataFrame, subscriptions_df: pd.DataFrame) -> pd.DataFrame:
+    """NRR: for each month, what % of prior-month subscription revenue did we retain?"""
+    _COLS = ["month", "nrr_pct", "starting_mrr", "ending_mrr"]
+    if charges_df.empty:
+        return pd.DataFrame(columns=_COLS)
+
+    df = charges_df.copy()
+    # Subscription charges only
+    mask = _has_valid_subscription_id(df.get("subscription_id", pd.Series(dtype=str))) & _is_collected_charge(df["status"])
+    df = df[mask].copy()
+    if df.empty:
+        return pd.DataFrame(columns=_COLS)
+
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+    if "refund_amount" not in df.columns:
+        df["refund_amount"] = 0.0
+    df["refund_amount"] = pd.to_numeric(df["refund_amount"], errors="coerce").fillna(0)
+    df["net_amount"] = _net_charge_amount(df)
+
+    df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
+    df = df.dropna(subset=["created_at"])
+    if df.empty:
+        return pd.DataFrame(columns=_COLS)
+    df["created_at"] = to_eastern(df["created_at"])
+    df["month_period"] = df["created_at"].dt.to_period("M")
+
+    # Per-customer per-month revenue
+    cust_monthly = (
+        df.groupby(["customer_email", "month_period"])["net_amount"]
+        .sum()
+        .reset_index()
+    )
+
+    months = sorted(cust_monthly["month_period"].unique())
+    if len(months) < 2:
+        return pd.DataFrame(columns=_COLS)
+
+    rows = []
+    for i, month in enumerate(months[1:], start=1):
+        prior_month = months[i - 1]
+        prior = cust_monthly[cust_monthly["month_period"] == prior_month]
+        current = cust_monthly[cust_monthly["month_period"] == month]
+
+        prior_customers = set(prior["customer_email"].unique())
+        starting = float(prior["net_amount"].sum())
+        ending = float(
+            current[current["customer_email"].isin(prior_customers)]["net_amount"].sum()
+        )
+        nrr_pct = round(ending / starting * 100, 2) if starting > 0 else float("nan")
+        rows.append({
+            "month": str(month),
+            "nrr_pct": nrr_pct,
+            "starting_mrr": round(starting, 2),
+            "ending_mrr": round(ending, 2),
+        })
+
+    return pd.DataFrame(rows, columns=_COLS)
 
 
 # ------------------------------------------------------------------
@@ -1675,6 +1764,78 @@ def refund_analysis(
     return by_product, time_to_refund, monthly_trend
 
 
+def failed_payment_analysis(
+    charges_df: pd.DataFrame,
+    orders_df: pd.DataFrame,
+    subscriptions_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Identify and aggregate failed (non-successful, non-refund) charge attempts."""
+    _MONTH_COLS = ["month", "failed_count", "failed_amount", "total_charge_count", "failure_rate_pct"]
+    _PROD_COLS = ["product_id", "product_name", "failed_count", "failed_amount", "total_charge_count", "failure_rate_pct"]
+    _empty = (pd.DataFrame(columns=_MONTH_COLS), pd.DataFrame(columns=_PROD_COLS))
+
+    if charges_df.empty:
+        return _empty
+
+    df = charges_df.copy()
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+    df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
+    df = df.dropna(subset=["created_at"])
+    if df.empty:
+        return _empty
+
+    df["created_at"] = to_eastern(df["created_at"])
+    df["month"] = df["created_at"].dt.to_period("M").astype(str)
+
+    status_norm = df["status"].fillna("").str.lower().str.strip()
+    df["_is_failed"] = (
+        (status_norm != "")
+        & ~_is_successful_charge(df["status"])
+        & ~_is_refund_charge(df["status"])
+    )
+
+    # by_month — two-step approach to avoid lambda index issues
+    failed_only = df[df["_is_failed"]]
+    failed_by_month = failed_only.groupby("month").agg(
+        failed_count=("amount", "count"),
+        failed_amount=("amount", "sum"),
+    ).reset_index()
+    total_by_month = df.groupby("month").agg(
+        total_charge_count=("amount", "count"),
+    ).reset_index()
+    by_month = total_by_month.merge(failed_by_month, on="month", how="left").fillna(0)
+    by_month["failed_count"] = by_month["failed_count"].astype(int)
+    by_month["failure_rate_pct"] = (
+        by_month["failed_count"] / by_month["total_charge_count"] * 100
+    ).where(by_month["total_charge_count"] > 0, 0.0).round(2)
+    by_month["failed_amount"] = by_month["failed_amount"].round(2)
+
+    # by_product
+    enriched = enrich_charges_with_product(df, orders_df, subscriptions_df)
+    if enriched.empty or "product_name" not in enriched.columns:
+        return by_month[_MONTH_COLS], pd.DataFrame(columns=_PROD_COLS)
+
+    failed_only_p = enriched[enriched["_is_failed"]]
+    failed_by_product = failed_only_p.groupby(["product_id", "product_name"]).agg(
+        failed_count=("amount", "count"),
+        failed_amount=("amount", "sum"),
+    ).reset_index()
+    total_by_product = enriched.groupby(["product_id", "product_name"]).agg(
+        total_charge_count=("amount", "count"),
+    ).reset_index()
+    by_product = total_by_product.merge(
+        failed_by_product, on=["product_id", "product_name"], how="left"
+    ).fillna(0)
+    by_product["failed_count"] = by_product["failed_count"].astype(int)
+    by_product["failure_rate_pct"] = (
+        by_product["failed_count"] / by_product["total_charge_count"] * 100
+    ).where(by_product["total_charge_count"] > 0, 0.0).round(2)
+    by_product["failed_amount"] = by_product["failed_amount"].round(2)
+    by_product = by_product[by_product["total_charge_count"] > 0].reset_index(drop=True)
+
+    return by_month[_MONTH_COLS], by_product[_PROD_COLS]
+
+
 # ------------------------------------------------------------------
 # Report 4: Churn Analysis
 # ------------------------------------------------------------------
@@ -1826,6 +1987,45 @@ def trial_conversion(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
     return result.sort_values("conversion_rate_pct", ascending=False).reset_index(drop=True)
 
 
+def trial_days_to_convert(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
+    """Distribution of trial lengths (in days) for converted vs. dropped subscribers."""
+    _COLS = ["product_id", "product_name", "trial_days", "customer_count", "outcome"]
+    if subscriptions_df.empty:
+        return pd.DataFrame(columns=_COLS)
+    if "trial_days" not in subscriptions_df.columns:
+        return pd.DataFrame(columns=_COLS)
+
+    df = subscriptions_df.copy()
+    df["trial_days"] = pd.to_numeric(df["trial_days"], errors="coerce").fillna(0).astype(int)
+    df["billing_cycle_count"] = pd.to_numeric(
+        df.get("billing_cycle_count", 0), errors="coerce"
+    ).fillna(0).astype(int)
+
+    df = df[df["trial_days"] > 0].copy()
+    if df.empty:
+        return pd.DataFrame(columns=_COLS)
+
+    converted = df[df["billing_cycle_count"] >= 1].copy()
+    converted["outcome"] = "converted"
+
+    dropped = df[
+        df["status"].str.lower().isin({"canceled", "cancelled"}) &
+        (df["billing_cycle_count"] == 0)
+    ].copy()
+    dropped["outcome"] = "dropped"
+
+    combined = pd.concat([converted, dropped], ignore_index=True)
+    if combined.empty:
+        return pd.DataFrame(columns=_COLS)
+
+    result = (
+        combined.groupby(["product_id", "product_name", "trial_days", "outcome"])
+        .size()
+        .reset_index(name="customer_count")
+    )
+    return result[_COLS].reset_index(drop=True)
+
+
 # ------------------------------------------------------------------
 # Report 6: Subscription Aging
 # ------------------------------------------------------------------
@@ -1864,6 +2064,39 @@ def subscription_aging(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(name="count")
     )
     return result
+
+
+def arpu_by_product(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
+    """Average Revenue Per User by product, for active subscriptions."""
+    _COLS = ["product_id", "product_name", "active_subscribers", "monthly_arpu", "annual_arpu"]
+    if subscriptions_df.empty:
+        return pd.DataFrame(columns=_COLS)
+
+    df = subscriptions_df.copy()
+    df = df[df["status"].str.lower() == "active"].copy()
+    if df.empty:
+        return pd.DataFrame(columns=_COLS)
+
+    df["interval"] = df["interval"].fillna("monthly")
+    df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+    df["monthly_price"] = df.apply(
+        lambda r: _normalize_to_monthly(r["price"], r["interval"]), axis=1
+    )
+
+    result = (
+        df.groupby(["product_id", "product_name"])
+        .agg(
+            monthly_revenue=("monthly_price", "sum"),
+            active_subscribers=("customer_email", "nunique"),
+        )
+        .reset_index()
+    )
+    result = result[result["active_subscribers"] > 0].copy()
+    result["monthly_arpu"] = (result["monthly_revenue"] / result["active_subscribers"]).round(2)
+    result["annual_arpu"] = (result["monthly_arpu"] * 12).round(2)
+    result = result.drop(columns=["monthly_revenue"])
+    result = result.sort_values("monthly_arpu", ascending=False).reset_index(drop=True)
+    return result[_COLS]
 
 
 # ------------------------------------------------------------------
