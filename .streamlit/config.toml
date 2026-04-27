@@ -8,8 +8,8 @@ showErrorDetails = false
 
 [theme]
 base = "dark"
-primaryColor = "#4F90F0"
-backgroundColor = "#0E1117"
-secondaryBackgroundColor = "#161C2A"
-textColor = "#E8EEF7"
+primaryColor = "#B8FF57"
+backgroundColor = "#07080E"
+secondaryBackgroundColor = "#0D0F1A"
+textColor = "#E8ECF8"
 font = "sans serif"

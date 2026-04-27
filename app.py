@@ -23,6 +23,21 @@ from version import LAST_UPDATED, VERSION
 logger = logging.getLogger(__name__)
 
 
+def _mc(label: str, value: str, delta: str | None = None, neg: bool = False, help_text: str | None = None) -> str:
+    """Render a custom HTML metric card matching the Electric Ledger aesthetic."""
+    delta_html = ""
+    if delta is not None:
+        cls = "neg" if neg else "pos"
+        delta_html = f'<div class="mc-delta {cls}">{delta}</div>'
+    help_html = f'<div class="mc-help" title="{help_text}">?</div>' if help_text else ""
+    return (
+        f'<div class="mc">{help_html}'
+        f'<div class="mc-label">{label}</div>'
+        f'<div class="mc-value">{value}</div>'
+        f'{delta_html}</div>'
+    )
+
+
 @st.cache_data(ttl=300)
 def _cached_nrr(charges_df, subs_df):
     return net_revenue_retention(charges_df, subs_df)
@@ -163,48 +178,92 @@ except Exception:
 r1c1, r1c2, r1c3, r1c4 = st.columns(4)
 r2c1, r2c2, r2c3, r2c4 = st.columns(4)
 
-r1c1.metric(
-    "Total Revenue",
-    f"${total_revenue:,.2f}",
-    delta=f"${revenue_delta:+,.0f} MoM" if revenue_delta is not None else None,
-    help="Net revenue from collected charges minus partial refunds.",
+_rev_delta_str = (
+    f"+${revenue_delta:,.0f} MoM" if revenue_delta and revenue_delta > 0
+    else (f"${revenue_delta:,.0f} MoM" if revenue_delta else None)
 )
-r1c2.metric(
-    "Total Customers",
-    f"{total_customers:,}",
-    delta=f"{customers_delta:+,} MoM" if customers_delta is not None else None,
-    help="Distinct customer records synced from SamCart.",
+_cust_delta_str = (
+    f"+{customers_delta:,} MoM" if customers_delta and customers_delta > 0
+    else (f"{customers_delta:,} MoM" if customers_delta else None)
 )
-r1c3.metric(
-    "Active Subscriptions",
-    f"{active_subs:,}",
-    help="Subscriptions currently in 'active' status.",
-)
-r1c4.metric(
-    "Avg Order Value",
-    f"${avg_order:,.2f}",
-    help="Mean order total across all orders.",
-)
-r2c1.metric(
-    "Churn Rate",
-    f"{churn_rate:.1f}%",
-    help="Lifetime canceled subscriptions / total subscriptions.",
-)
-r2c2.metric(
-    "Net Revenue Retention",
-    nrr_str,
-    help="Last month's subscription revenue retained from prior-month customers, as a % of their prior-month revenue. >100% = growing without new customers.",
-)
-r2c3.metric(
-    "Avg Monthly ARPU",
-    f"${avg_arpu:,.2f}",
-    help="Weighted average monthly revenue per active subscriber across all products.",
-)
-r2c4.metric(
-    "Top 10 Concentration",
-    top10_pct_str,
-    help="Share of total customer revenue earned by your top 10 customers.",
-)
+
+with r1c1:
+    st.markdown(
+        _mc(
+            "Total Revenue",
+            f"${total_revenue:,.0f}",
+            delta=_rev_delta_str,
+            neg=revenue_delta is not None and revenue_delta < 0,
+            help_text="Net revenue from collected charges minus partial refunds.",
+        ),
+        unsafe_allow_html=True,
+    )
+with r1c2:
+    st.markdown(
+        _mc(
+            "Total Customers",
+            f"{total_customers:,}",
+            delta=_cust_delta_str,
+            neg=customers_delta is not None and customers_delta < 0,
+            help_text="Distinct customer records synced from SamCart.",
+        ),
+        unsafe_allow_html=True,
+    )
+with r1c3:
+    st.markdown(
+        _mc(
+            "Active Subscriptions",
+            f"{active_subs:,}",
+            help_text="Subscriptions currently in 'active' status.",
+        ),
+        unsafe_allow_html=True,
+    )
+with r1c4:
+    st.markdown(
+        _mc(
+            "Avg Order Value",
+            f"${avg_order:,.2f}",
+            help_text="Mean order total across all orders.",
+        ),
+        unsafe_allow_html=True,
+    )
+
+with r2c1:
+    st.markdown(
+        _mc(
+            "Churn Rate",
+            f"{churn_rate:.1f}%",
+            help_text="Lifetime canceled subscriptions / total subscriptions.",
+        ),
+        unsafe_allow_html=True,
+    )
+with r2c2:
+    st.markdown(
+        _mc(
+            "Net Revenue Retention",
+            nrr_str,
+            help_text="Last month's subscription revenue retained from prior-month customers. >100% = growing without new customers.",
+        ),
+        unsafe_allow_html=True,
+    )
+with r2c3:
+    st.markdown(
+        _mc(
+            "Avg Monthly ARPU",
+            f"${avg_arpu:,.2f}",
+            help_text="Weighted average monthly revenue per active subscriber.",
+        ),
+        unsafe_allow_html=True,
+    )
+with r2c4:
+    st.markdown(
+        _mc(
+            "Top 10 Concentration",
+            top10_pct_str,
+            help_text="Share of total revenue earned by your top 10 customers.",
+        ),
+        unsafe_allow_html=True,
+    )
 
 st.markdown("")
 
@@ -224,7 +283,7 @@ if not monthly.empty:
     fig.update_traces(
         texttemplate="%{text} orders",
         textposition="outside",
-        marker_color="#4F90F0",
+        marker_color="#B8FF57",
         hovertemplate="<b>%{x}</b><br>Revenue: $%{y:,.0f}<br>Orders: %{text}<extra></extra>",
     )
     fig.update_layout(
