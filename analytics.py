@@ -1062,13 +1062,41 @@ def daily_renewals(
     return result
 
 
+def daily_subscription_signups(subscriptions_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Daily new subscription records created, by product.
+
+    This is the right way to track trial product signups: trial products
+    generate subscriptions (not charges), so charge-based metrics miss them.
+
+    Returns: date, product_id, product_name, subscription_signup_count
+    """
+    cols = ["date", "product_id", "product_name", "subscription_signup_count"]
+    if subscriptions_df.empty:
+        return pd.DataFrame(columns=cols)
+
+    df = subscriptions_df.copy()
+    df["created_at"] = _to_eastern(df["created_at"])
+    df = df.dropna(subset=["created_at"])
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+
+    df["date"] = df["created_at"].dt.date
+
+    return (
+        df.groupby(["date", "product_id", "product_name"])
+        .size()
+        .reset_index(name="subscription_signup_count")
+    )
+
+
 def build_daily_summary(
     orders_df: pd.DataFrame,
     charges_df: pd.DataFrame,
     subscriptions_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Combined daily summary: new customers, new sales, refunds, renewals.
+    Combined daily summary: new customers, new sales, refunds, renewals, subscription signups.
 
     Returns flat table with all metrics merged on [date, product_id, product_name].
     """
@@ -1076,11 +1104,12 @@ def build_daily_summary(
     ns = daily_new_sales(charges_df, orders_df, subscriptions_df)
     ref = daily_refunds(charges_df, orders_df, subscriptions_df)
     ren = daily_renewals(charges_df, orders_df, subscriptions_df)
+    sig = daily_subscription_signups(subscriptions_df)
 
     merge_keys = ["date", "product_id", "product_name"]
 
     result = ntf
-    for right in [ns, ref, ren]:
+    for right in [ns, ref, ren, sig]:
         if right.empty:
             continue
         if result.empty:
@@ -1093,11 +1122,13 @@ def build_daily_summary(
             "date", "product_id", "product_name",
             "new_customer_count", "sale_count", "sale_revenue",
             "refund_count", "refund_amount", "renewal_count", "renewal_revenue",
+            "subscription_signup_count",
         ])
 
     fill_cols = [
         "new_customer_count", "sale_count", "sale_revenue",
         "refund_count", "refund_amount", "renewal_count", "renewal_revenue",
+        "subscription_signup_count",
     ]
     for col in fill_cols:
         if col in result.columns:

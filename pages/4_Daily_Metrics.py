@@ -129,11 +129,12 @@ if filtered.empty:
 # Summary metrics row
 # ------------------------------------------------------------------
 
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("Total New Customers", f"{int(filtered['new_customer_count'].sum()):,}", help="Unique new-to-file customers. Each customer is counted once, attributed to the first product they purchased (by timestamp).")
 m2.metric("Total New Sales", f"{int(filtered['sale_count'].sum()):,}")
 m3.metric("Total Refunds", f"{int(filtered['refund_count'].sum()):,}")
 m4.metric("Total Renewals", f"{int(filtered['renewal_count'].sum()):,}")
+m5.metric("Total Subscription Signups", f"{int(filtered['subscription_signup_count'].sum()):,}", help="New subscription records created each day. Tracks trial product signups (trial products create subscriptions, not charges).")
 
 # ------------------------------------------------------------------
 # Tabs
@@ -157,13 +158,14 @@ _cf = {
     "date_range_days": _date_range_days,
 }
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "Daily Summary",
     "New Customers Trend",
     "New Sales Trend",
     "Refunds Trend",
     "Renewals Trend",
     "Entry Product LTV",
+    "Subscription Signups",
 ])
 
 # --- Tab 1: Daily Summary Table ---
@@ -176,6 +178,7 @@ with tab1:
             "sale_revenue": st.column_config.NumberColumn("Sale Revenue", format="$%.2f"),
             "refund_amount": st.column_config.NumberColumn("Refund Amount", format="$%.2f"),
             "renewal_revenue": st.column_config.NumberColumn("Renewal Revenue", format="$%.2f"),
+            "subscription_signup_count": st.column_config.NumberColumn("Subscription Signups"),
         },
         use_container_width=True,
     )
@@ -184,7 +187,8 @@ with tab1:
     totals["date"] = "TOTAL"
     totals["product_name"] = ""
     for col in ["new_customer_count", "sale_count", "sale_revenue",
-                "refund_count", "refund_amount", "renewal_count", "renewal_revenue"]:
+                "refund_count", "refund_amount", "renewal_count", "renewal_revenue",
+                "subscription_signup_count"]:
         if col in display_df.columns:
             totals[col] = display_df[col].sum()
     export_df = pd.concat([display_df, pd.DataFrame([totals])], ignore_index=True)
@@ -538,6 +542,27 @@ with tab6:
         st.info("Not enough mature cohort data to build a progression chart.")
 
     render_automate_button("daily_metrics_entry_ltv", "Daily Metrics — Entry Product LTV", _filters_summary, current_filters=_cf)
+
+# --- Tab 7: Subscription Signups ---
+with tab7:
+    daily_sig = (
+        filtered.groupby(["date", "product_name"])["subscription_signup_count"]
+        .sum()
+        .reset_index()
+    )
+    if not daily_sig.empty:
+        fig_sig = px.line(
+            daily_sig,
+            x="date",
+            y="subscription_signup_count",
+            color="product_name",
+            labels={"subscription_signup_count": "Subscription Signups", "date": "Date", "product_name": "Product"},
+            title="Subscription Signups by Product",
+        )
+        st.plotly_chart(fig_sig, use_container_width=True)
+    else:
+        st.info("No subscription signup data for selected filters.")
+    render_automate_button("daily_metrics_subscription_signups", "Daily Metrics — Subscription Signups", _filters_summary, current_filters=_cf)
 
 # ------------------------------------------------------------------
 # Google Sheets upload
