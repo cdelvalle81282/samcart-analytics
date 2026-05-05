@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -24,6 +25,7 @@ from shared import load_charges, load_orders, load_subscriptions, render_doc_tab
 
 logger = logging.getLogger(__name__)
 
+_PAGE_T0 = time.perf_counter()
 _PROGRESSION_WINDOWS = [15, 30, 60, 90, 120, 150, 180]
 
 
@@ -99,6 +101,9 @@ st.caption("New customers, sales, refunds, and renewals by product — day by da
 orders_df = load_orders()
 charges_df = load_charges()
 subs_df = load_subscriptions()
+_t_loaders = time.perf_counter()
+logger.warning("[PERF] daily_metrics loaders: %.2fs (orders=%d, charges=%d, subs=%d)",
+               _t_loaders - _PAGE_T0, len(orders_df), len(charges_df), len(subs_df))
 
 if orders_df.empty and charges_df.empty:
     st.info("No data yet. Run a sync from the sidebar.")
@@ -109,6 +114,7 @@ if orders_df.empty and charges_df.empty:
 # ------------------------------------------------------------------
 
 summary_df = _cached_daily_summary()
+logger.warning("[PERF] daily_metrics build_daily_summary: %.2fs", time.perf_counter() - _t_loaders)
 
 if summary_df.empty:
     st.warning("No daily metrics data available.")
