@@ -760,6 +760,9 @@ def enrich_charges_with_product(
     charges_df: pd.DataFrame,
     orders_df: pd.DataFrame,
     subscriptions_df: pd.DataFrame,
+    *,
+    _order_products: pd.DataFrame | None = None,
+    _sub_products: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Add product_id and product_name to charges by joining orders and subscriptions.
@@ -767,41 +770,47 @@ def enrich_charges_with_product(
     Prefers order-derived product info, falls back to subscription-derived.
     Applies a third-pass correction for upsell charges that SamCart files
     against the parent order with no dedicated order record.
+
+    _order_products / _sub_products: pre-built lookup DataFrames (already renamed
+    and str-cast). When provided, skip rebuilding them — caller must guarantee the
+    format matches what this function would build internally.
     """
     df = charges_df.copy()
 
     # Join via order_id (charges.order_id → orders.id)
-    if not orders_df.empty and "order_id" in df.columns and "id" in orders_df.columns:
-        order_products = (
-            orders_df[["id", "product_id", "product_name"]]
-            .drop_duplicates("id", keep="last")
-            .rename(columns={"id": "order_id", "product_id": "o_product_id", "product_name": "o_product_name"})
-        )
+    if "order_id" in df.columns and (
+        _order_products is not None or (not orders_df.empty and "id" in orders_df.columns)
+    ):
+        if _order_products is None:
+            _order_products = (
+                orders_df[["id", "product_id", "product_name"]]
+                .drop_duplicates("id", keep="last")
+                .rename(columns={"id": "order_id", "product_id": "o_product_id", "product_name": "o_product_name"})
+            )
+            _order_products["order_id"] = _order_products["order_id"].astype(str)
         df["order_id"] = df["order_id"].astype(str)
-        order_products["order_id"] = order_products["order_id"].astype(str)
-        df = df.merge(order_products, on="order_id", how="left")
+        df = df.merge(_order_products, on="order_id", how="left")
     else:
         df["o_product_id"] = pd.NA
         df["o_product_name"] = pd.NA
 
     # Join via subscription_id
-    if (
-        not subscriptions_df.empty
-        and "subscription_id" in df.columns
-        and "id" in subscriptions_df.columns
+    if "subscription_id" in df.columns and (
+        _sub_products is not None or (not subscriptions_df.empty and "id" in subscriptions_df.columns)
     ):
-        sub_products = (
-            subscriptions_df[["id", "product_id", "product_name"]]
-            .drop_duplicates("id", keep="last")
-            .rename(columns={
-                "id": "subscription_id",
-                "product_id": "s_product_id",
-                "product_name": "s_product_name",
-            })
-        )
+        if _sub_products is None:
+            _sub_products = (
+                subscriptions_df[["id", "product_id", "product_name"]]
+                .drop_duplicates("id", keep="last")
+                .rename(columns={
+                    "id": "subscription_id",
+                    "product_id": "s_product_id",
+                    "product_name": "s_product_name",
+                })
+            )
+            _sub_products["subscription_id"] = _sub_products["subscription_id"].astype(str)
         df["subscription_id"] = df["subscription_id"].astype(str)
-        sub_products["subscription_id"] = sub_products["subscription_id"].astype(str)
-        df = df.merge(sub_products, on="subscription_id", how="left")
+        df = df.merge(_sub_products, on="subscription_id", how="left")
     else:
         df["s_product_id"] = pd.NA
         df["s_product_name"] = pd.NA
@@ -932,6 +941,9 @@ def daily_new_sales(
     charges_df: pd.DataFrame,
     orders_df: pd.DataFrame,
     subscriptions_df: pd.DataFrame,
+    *,
+    _order_products: pd.DataFrame | None = None,
+    _sub_products: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Daily new sales (initial purchases + one-time charges) by product.
@@ -948,7 +960,8 @@ def daily_new_sales(
     if df.empty:
         return pd.DataFrame(columns=cols)
 
-    df = enrich_charges_with_product(df, orders_df, subscriptions_df)
+    df = enrich_charges_with_product(df, orders_df, subscriptions_df,
+                                     _order_products=_order_products, _sub_products=_sub_products)
     df["net_amount"] = _net_charge_amount(df)
     df["created_at"] = _to_eastern(df["created_at"])
     df = df.dropna(subset=["created_at"])
@@ -973,6 +986,9 @@ def daily_refunds(
     charges_df: pd.DataFrame,
     orders_df: pd.DataFrame,
     subscriptions_df: pd.DataFrame,
+    *,
+    _order_products: pd.DataFrame | None = None,
+    _sub_products: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Daily refunds by product.
@@ -990,7 +1006,8 @@ def daily_refunds(
     if df.empty:
         return pd.DataFrame(columns=cols)
 
-    df = enrich_charges_with_product(df, orders_df, subscriptions_df)
+    df = enrich_charges_with_product(df, orders_df, subscriptions_df,
+                                     _order_products=_order_products, _sub_products=_sub_products)
 
     df["_effective_refund"] = _refund_charge_amount(df)
 
@@ -1018,6 +1035,9 @@ def daily_renewals(
     charges_df: pd.DataFrame,
     orders_df: pd.DataFrame,
     subscriptions_df: pd.DataFrame,
+    *,
+    _order_products: pd.DataFrame | None = None,
+    _sub_products: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Daily renewal charges by product.
@@ -1041,7 +1061,8 @@ def daily_renewals(
     if df.empty:
         return pd.DataFrame(columns=cols)
 
-    df = enrich_charges_with_product(df, orders_df, subscriptions_df)
+    df = enrich_charges_with_product(df, orders_df, subscriptions_df,
+                                     _order_products=_order_products, _sub_products=_sub_products)
     df["net_amount"] = _net_charge_amount(df)
     df["created_at"] = _to_eastern(df["created_at"])
     df = df.dropna(subset=["created_at"])
@@ -1100,10 +1121,29 @@ def build_daily_summary(
 
     Returns flat table with all metrics merged on [date, product_id, product_name].
     """
+    # Pre-build product lookup tables once — these are filter-independent and
+    # shared across the three per-subset enrich calls below.
+    _op: pd.DataFrame | None = None
+    _sp: pd.DataFrame | None = None
+    if not orders_df.empty and "id" in orders_df.columns:
+        _op = (
+            orders_df[["id", "product_id", "product_name"]]
+            .drop_duplicates("id", keep="last")
+            .rename(columns={"id": "order_id", "product_id": "o_product_id", "product_name": "o_product_name"})
+        )
+        _op["order_id"] = _op["order_id"].astype(str)
+    if not subscriptions_df.empty and "id" in subscriptions_df.columns:
+        _sp = (
+            subscriptions_df[["id", "product_id", "product_name"]]
+            .drop_duplicates("id", keep="last")
+            .rename(columns={"id": "subscription_id", "product_id": "s_product_id", "product_name": "s_product_name"})
+        )
+        _sp["subscription_id"] = _sp["subscription_id"].astype(str)
+
     ntf = daily_new_to_file(orders_df)
-    ns = daily_new_sales(charges_df, orders_df, subscriptions_df)
-    ref = daily_refunds(charges_df, orders_df, subscriptions_df)
-    ren = daily_renewals(charges_df, orders_df, subscriptions_df)
+    ns = daily_new_sales(charges_df, orders_df, subscriptions_df, _order_products=_op, _sub_products=_sp)
+    ref = daily_refunds(charges_df, orders_df, subscriptions_df, _order_products=_op, _sub_products=_sp)
+    ren = daily_renewals(charges_df, orders_df, subscriptions_df, _order_products=_op, _sub_products=_sp)
     sig = daily_subscription_signups(subscriptions_df)
 
     merge_keys = ["date", "product_id", "product_name"]
@@ -1252,6 +1292,8 @@ def new_customer_ltv_by_entry_product(
     start_date=None,
     end_date=None,
     ltv_window_days: int | None = None,
+    *,
+    _ltv_base=None,
 ) -> pd.DataFrame:
     """
     LTV analysis grouped by each customer's entry product (first purchase).
@@ -1264,11 +1306,19 @@ def new_customer_ltv_by_entry_product(
     matured (first purchase < ltv_window_days ago) are excluded so the
     average isn't dragged down by incomplete windows.
 
+    _ltv_base: pre-computed tuple from _prepare_ltv_base(). When provided,
+    start_date/end_date must be None (they were applied when the base was built).
+
     Returns: product_id, product_name, customer_count, avg_entry_price, avg_ltv, total_ltv
     """
+    assert _ltv_base is None or (start_date is None and end_date is None), \
+        "_ltv_base and start_date/end_date are mutually exclusive"
     cols = ["product_id", "product_name", "customer_count", "avg_entry_price", "avg_ltv", "total_ltv"]
 
-    first_orders, charges_with_ts, odf = _prepare_ltv_base(orders_df, charges_df, start_date, end_date)
+    if _ltv_base is not None:
+        first_orders, charges_with_ts, odf = _ltv_base
+    else:
+        first_orders, charges_with_ts, odf = _prepare_ltv_base(orders_df, charges_df, start_date, end_date)
     if first_orders is None:
         return pd.DataFrame(columns=cols)
     if first_orders.empty:
@@ -1295,6 +1345,8 @@ def ltv_progression_by_entry_product(
     start_date=None,
     end_date=None,
     windows: list[int] | None = None,
+    *,
+    _ltv_base=None,
 ) -> pd.DataFrame:
     """
     Average LTV at each time window (30/60/90/180/365 days) per entry product.
@@ -1302,13 +1354,21 @@ def ltv_progression_by_entry_product(
     Only cohorts mature enough for each window are included — a product's
     customer_count may decrease at longer windows as recent buyers are excluded.
 
+    _ltv_base: pre-computed tuple from _prepare_ltv_base(). When provided,
+    start_date/end_date must be None (they were applied when the base was built).
+
     Returns tidy DataFrame: window_days, product_name, avg_ltv, customer_count
     """
+    assert _ltv_base is None or (start_date is None and end_date is None), \
+        "_ltv_base and start_date/end_date are mutually exclusive"
     cols = ["window_days", "product_name", "avg_ltv", "customer_count"]
     if windows is None:
         windows = LTV_PROGRESSION_WINDOWS
 
-    first_orders, charges_with_ts, odf = _prepare_ltv_base(orders_df, charges_df, start_date, end_date)
+    if _ltv_base is not None:
+        first_orders, charges_with_ts, odf = _ltv_base
+    else:
+        first_orders, charges_with_ts, odf = _prepare_ltv_base(orders_df, charges_df, start_date, end_date)
     if first_orders is None or first_orders.empty:
         return pd.DataFrame(columns=cols)
 
@@ -1333,6 +1393,8 @@ def ltv_audit_charges(
     start_date=None,
     end_date=None,
     ltv_window_days: int | None = None,
+    *,
+    _ltv_base=None,
 ) -> pd.DataFrame:
     """
     Charge-level audit data for verifying LTV calculations.
@@ -1343,13 +1405,21 @@ def ltv_audit_charges(
     Columns: customer_email, entry_product_name, first_purchase_date,
              charge_id, charge_date, days_since_first, amount, refund_amount,
              net_amount, counted_in_window
+
+    _ltv_base: pre-computed tuple from _prepare_ltv_base(). When provided,
+    start_date/end_date must be None (they were applied when the base was built).
     """
+    assert _ltv_base is None or (start_date is None and end_date is None), \
+        "_ltv_base and start_date/end_date are mutually exclusive"
     cols = [
         "customer_email", "entry_product_name", "first_purchase_date",
         "charge_id", "charge_date", "days_since_first",
         "amount", "refund_amount", "net_amount", "counted_in_window",
     ]
-    first_orders, charges_with_ts, odf = _prepare_ltv_base(orders_df, charges_df, start_date, end_date)
+    if _ltv_base is not None:
+        first_orders, charges_with_ts, odf = _ltv_base
+    else:
+        first_orders, charges_with_ts, odf = _prepare_ltv_base(orders_df, charges_df, start_date, end_date)
     if first_orders is None or first_orders.empty:
         return pd.DataFrame(columns=cols)
 

@@ -30,6 +30,8 @@ def _clear_data_cache() -> None:
     load_subscriptions.clear()
     load_products.clear()
     load_customers.clear()
+    # Reset LTV tab gate so stale cached LTV isn't shown after a data refresh
+    st.session_state.pop("ltv_tab_loaded", None)
 
 
 def _run_sync(label: str, sync_fn) -> None:

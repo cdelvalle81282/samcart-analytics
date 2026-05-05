@@ -13,8 +13,13 @@ from shared import load_orders, load_products, load_subscriptions, render_doc_ta
 
 
 @st.cache_data(ttl=300)
-def _cached_product_ltv(orders_df, subs_df, products_df):
-    return product_ltv_ranking(orders_df, subs_df, products_df)
+def _cached_product_ltv(start_iso: str, end_iso: str):
+    odf = load_orders().copy()
+    odf["created_at"] = to_eastern(odf["created_at"])
+    start = pd.Timestamp(start_iso).date()
+    end = pd.Timestamp(end_iso).date()
+    mask = (odf["created_at"].dt.date >= start) & (odf["created_at"].dt.date <= end)
+    return product_ltv_ranking(odf[mask], load_subscriptions(), load_products())
 
 
 
@@ -27,8 +32,6 @@ st.caption("Which products generate the most revenue and the highest customer li
 
 
 orders_df = load_orders()
-subs_df = load_subscriptions()
-products_df = load_products()
 
 if orders_df.empty:
     st.info("No data yet. Run a sync from the sidebar.")
@@ -40,11 +43,12 @@ if orders_df.empty:
 
 col1, col2 = st.columns(2)
 
-# Date range filter
-orders_df["created_at"] = to_eastern(orders_df["created_at"])
-min_date = orders_df["created_at"].min()
-max_date = orders_df["created_at"].max()
+# Date range filter — convert to ET only for computing widget bounds
+_created_et = to_eastern(orders_df["created_at"])
+min_date = _created_et.min()
+max_date = _created_et.max()
 
+start, end = None, None
 if pd.notna(min_date) and pd.notna(max_date):
     date_range = col1.date_input(
         "Date Range",
@@ -54,8 +58,6 @@ if pd.notna(min_date) and pd.notna(max_date):
     )
     if len(date_range) == 2:
         start, end = date_range
-        mask = (orders_df["created_at"].dt.date >= start) & (orders_df["created_at"].dt.date <= end)
-        orders_df = orders_df[mask]
 
 # Min order count filter
 min_orders = col2.number_input("Min Order Count", min_value=0, value=0, step=1)
@@ -64,7 +66,10 @@ min_orders = col2.number_input("Min Order Count", min_value=0, value=0, step=1)
 # Product ranking
 # ------------------------------------------------------------------
 
-ranking = _cached_product_ltv(orders_df, subs_df, products_df)
+if start is None or end is None:
+    ranking = _cached_product_ltv(str(min_date.date()), str(max_date.date()))
+else:
+    ranking = _cached_product_ltv(str(start), str(end))
 
 if ranking.empty:
     st.warning("No product data to display.")

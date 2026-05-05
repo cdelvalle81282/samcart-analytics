@@ -10,6 +10,7 @@ import plotly.express as px
 import streamlit as st
 
 from analytics import (
+    _prepare_ltv_base,
     build_daily_summary,
     ltv_audit_charges,
     ltv_progression_by_entry_product,
@@ -32,29 +33,59 @@ def _cached_daily_summary():
 
 
 @st.cache_data(ttl=300)
+def _cached_ltv_base(ltv_start, ltv_end):
+    base = _prepare_ltv_base(load_orders(), load_charges(), ltv_start, ltv_end)
+    if base[0] is None:
+        return None
+    return {"first_orders": base[0], "charges_with_ts": base[1], "odf": base[2]}
+
+
+def _unpack_ltv_base(ltv_start, ltv_end):
+    """Return the cached LTV base tuple, or None if data is unavailable."""
+    d = _cached_ltv_base(ltv_start, ltv_end)
+    if d is None:
+        return None
+    return (d["first_orders"], d["charges_with_ts"], d["odf"])
+
+
+@st.cache_data(ttl=300)
 def _cached_ltv_progression(ltv_start, ltv_end):
+    base = _unpack_ltv_base(ltv_start, ltv_end)
+    if base is None:
+        return pd.DataFrame(columns=["window_days", "product_name", "avg_ltv", "customer_count"])
     return ltv_progression_by_entry_product(
         load_orders(), load_charges(), load_subscriptions(),
-        start_date=ltv_start, end_date=ltv_end,
         windows=_PROGRESSION_WINDOWS,
+        _ltv_base=base,
     )
 
 
 @st.cache_data(ttl=300)
 def _cached_new_customer_ltv(ltv_start, ltv_end, window_days):
+    base = _unpack_ltv_base(ltv_start, ltv_end)
+    if base is None:
+        return pd.DataFrame(columns=["product_id", "product_name", "customer_count",
+                                     "avg_entry_price", "avg_ltv", "total_ltv"])
     return new_customer_ltv_by_entry_product(
         load_orders(), load_charges(), load_subscriptions(),
-        start_date=ltv_start, end_date=ltv_end,
         ltv_window_days=window_days,
+        _ltv_base=base,
     )
 
 
 @st.cache_data(ttl=300)
 def _cached_ltv_audit(ltv_start, ltv_end, window_days):
+    base = _unpack_ltv_base(ltv_start, ltv_end)
+    if base is None:
+        return pd.DataFrame(columns=[
+            "customer_email", "entry_product_name", "first_purchase_date",
+            "charge_id", "charge_date", "days_since_first",
+            "amount", "refund_amount", "net_amount", "counted_in_window",
+        ])
     return ltv_audit_charges(
         load_orders(), load_charges(), load_subscriptions(),
-        start_date=ltv_start, end_date=ltv_end,
         ltv_window_days=window_days,
+        _ltv_base=base,
     )
 
 
@@ -317,231 +348,237 @@ with tab6:
     ltv_start = date_range[0] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else None
     ltv_end = date_range[1] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else None
 
-    _CUSTOM_LABEL = "Custom..."
-    _WINDOW_PRESETS: dict[str, int | None] = {"30 days": 30, "60 days": 60, "90 days": 90, "180 days": 180, "365 days": 365, "All time": None}
-    _window_label = st.radio(
-        "LTV window",
-        options=list(_WINDOW_PRESETS.keys()) + [_CUSTOM_LABEL],
-        index=2,
-        horizontal=True,
-        key="ltv_window_radio",
-    )
-
-    _chosen_window: int | None = None
-    if _window_label == _CUSTOM_LABEL:
-        _custom_days = st.number_input(
-            "Days",
-            min_value=1,
-            max_value=3650,
-            value=90,
-            step=30,
-            key="ltv_window_custom",
-        )
-        _chosen_window = int(_custom_days)
-        _window_display = f"{_custom_days}-day"
+    if not st.session_state.get("ltv_tab_loaded"):
+        st.info("LTV analysis is compute-intensive. Click below to load it.")
+        if st.button("Load LTV Analysis", key="load_ltv"):
+            st.session_state["ltv_tab_loaded"] = True
+            st.rerun()
     else:
-        _chosen_window = _WINDOW_PRESETS[_window_label]  # type: ignore[assignment]
-        _window_display = _window_label if _chosen_window is None else f"{_chosen_window}-day"
-
-    ltv_df = _cached_new_customer_ltv(ltv_start, ltv_end, _chosen_window)
-    if selected_products:
-        ltv_df = ltv_df[ltv_df["product_name"].isin(selected_products)]
-
-    # Products that survived the price tier filter — used to sync the progression chart.
-    # Tracked separately so prog_df is never restricted by ltv_df's maturity cutoff.
-    _ep_price_products: set[str] | None = None
-    if not ltv_df.empty and "avg_entry_price" in ltv_df.columns:
-        _PRICE_TIERS = {"All prices": None, "$49 and under": 49, "$99 and under": 99}
-        # Only show tiers that have at least one product in range
-        _available_tiers = [
-            label for label, cap in _PRICE_TIERS.items()
-            if cap is None or (ltv_df["avg_entry_price"] <= cap).any()
-        ]
-        if len(_available_tiers) > 1:
-            _tier_key = f"ltv_price_tier_{_chosen_window}_{'_'.join(sorted(selected_products or []))}"
-            _selected_tier = st.radio(
-                "Entry price tier",
-                options=_available_tiers,
-                horizontal=True,
-                key=_tier_key,
-            )
-            _tier_cap = _PRICE_TIERS[_selected_tier]
-            if _tier_cap is not None:
-                ltv_df = ltv_df[ltv_df["avg_entry_price"] <= _tier_cap]
-            _ep_price_products = set(ltv_df["product_name"])
-
-    if not ltv_df.empty:
-        _chart_title = f"Average {_window_display} LTV by Entry Product"
-        if _chosen_window is not None:
-            st.caption(
-                f"Only customers whose first purchase was at least {_chosen_window} days ago are included "
-                f"(mature cohorts). Revenue counted within {_chosen_window} days of first purchase."
-            )
-        fig_ltv = px.bar(
-            ltv_df,
-            x="product_name",
-            y="avg_ltv",
-            text="customer_count",
-            labels={"avg_ltv": f"Avg {_window_display} LTV ($)", "product_name": "Entry Product", "customer_count": "Customers"},
-            title=_chart_title,
+        _CUSTOM_LABEL = "Custom..."
+        _WINDOW_PRESETS: dict[str, int | None] = {"30 days": 30, "60 days": 60, "90 days": 90, "180 days": 180, "365 days": 365, "All time": None}
+        _window_label = st.radio(
+            "LTV window",
+            options=list(_WINDOW_PRESETS.keys()) + [_CUSTOM_LABEL],
+            index=2,
+            horizontal=True,
+            key="ltv_window_radio",
         )
-        fig_ltv.update_traces(texttemplate="%{text} customers", textposition="outside")
-        fig_ltv.update_layout(yaxis_tickformat="$,.0f")
-        st.plotly_chart(fig_ltv, use_container_width=True)
 
-        st.subheader("LTV Details")
-        st.dataframe(
-            ltv_df,
-            column_config={
-                "avg_entry_price": st.column_config.NumberColumn("Avg Entry Price", format="$%.2f"),
-                "avg_ltv": st.column_config.NumberColumn(f"Avg {_window_display} LTV", format="$%.2f"),
-                "total_ltv": st.column_config.NumberColumn("Total LTV", format="$%.2f"),
-            },
-            use_container_width=True,
-        )
-        render_export_buttons(ltv_df, "entry_product_ltv", key_prefix="entry_ltv")
+        _chosen_window: int | None = None
+        if _window_label == _CUSTOM_LABEL:
+            _custom_days = st.number_input(
+                "Days",
+                min_value=1,
+                max_value=3650,
+                value=90,
+                step=30,
+                key="ltv_window_custom",
+            )
+            _chosen_window = int(_custom_days)
+            _window_display = f"{_custom_days}-day"
+        else:
+            _chosen_window = _WINDOW_PRESETS[_window_label]  # type: ignore[assignment]
+            _window_display = _window_label if _chosen_window is None else f"{_chosen_window}-day"
 
-        # Audit expander: consistency check + charge-level detail (computed on open only)
-        with st.expander("Audit — charge-level detail"):
-            _audit_raw = _cached_ltv_audit(ltv_start, ltv_end, _chosen_window)
-            if _audit_raw.empty:
-                st.info("No charge data available for audit.")
-            else:
-                # Consistency check: avg_ltv should equal mean of per-customer windowed spend
-                _per_cust = (
-                    _audit_raw[_audit_raw["counted_in_window"]]
-                    .groupby(["entry_product_name", "customer_email"])["net_amount"]
-                    .sum()
-                    .reset_index()
-                    .groupby("entry_product_name")["net_amount"]
-                    .mean()
-                    .reset_index()
-                    .rename(columns={"entry_product_name": "product_name", "net_amount": "computed_avg"})
-                )
-                _merged_check = ltv_df[["product_name", "avg_ltv"]].merge(
-                    _per_cust, on="product_name", how="left"
-                )
-                _mismatches = _merged_check[
-                    (_merged_check["computed_avg"] - _merged_check["avg_ltv"]).abs() > 0.01
-                ]
-                if not _mismatches.empty:
-                    st.warning(
-                        f"Consistency check failed for {len(_mismatches)} product(s): "
-                        + ", ".join(_mismatches["product_name"].tolist())
-                    )
-                else:
-                    st.success("Consistency check passed — all avg LTV values verified.")
+        ltv_df = _cached_new_customer_ltv(ltv_start, ltv_end, _chosen_window)
+        if selected_products:
+            ltv_df = ltv_df[ltv_df["product_name"].isin(selected_products)]
 
-                _audit_products = sorted(_audit_raw["entry_product_name"].dropna().unique().tolist())
-                _audit_product_sel = st.selectbox(
-                    "Entry product to inspect",
-                    options=_audit_products,
-                    key="ltv_audit_product",
+        # Products that survived the price tier filter — used to sync the progression chart.
+        # Tracked separately so prog_df is never restricted by ltv_df's maturity cutoff.
+        _ep_price_products: set[str] | None = None
+        if not ltv_df.empty and "avg_entry_price" in ltv_df.columns:
+            _PRICE_TIERS = {"All prices": None, "$49 and under": 49, "$99 and under": 99}
+            # Only show tiers that have at least one product in range
+            _available_tiers = [
+                label for label, cap in _PRICE_TIERS.items()
+                if cap is None or (ltv_df["avg_entry_price"] <= cap).any()
+            ]
+            if len(_available_tiers) > 1:
+                _tier_key = f"ltv_price_tier_{_chosen_window}_{'_'.join(sorted(selected_products or []))}"
+                _selected_tier = st.radio(
+                    "Entry price tier",
+                    options=_available_tiers,
+                    horizontal=True,
+                    key=_tier_key,
                 )
-                _audit_customer_df = _audit_raw[_audit_raw["entry_product_name"] == _audit_product_sel]
+                _tier_cap = _PRICE_TIERS[_selected_tier]
+                if _tier_cap is not None:
+                    ltv_df = ltv_df[ltv_df["avg_entry_price"] <= _tier_cap]
+                _ep_price_products = set(ltv_df["product_name"])
 
-                # Per-customer summary for quick scan
-                _cust_summary = (
-                    _audit_customer_df[_audit_customer_df["counted_in_window"]]
-                    .groupby("customer_email")["net_amount"]
-                    .sum()
-                    .reset_index()
-                    .rename(columns={"net_amount": "ltv_in_window"})
-                    .sort_values("ltv_in_window", ascending=False)
-                )
+        if not ltv_df.empty:
+            _chart_title = f"Average {_window_display} LTV by Entry Product"
+            if _chosen_window is not None:
                 st.caption(
-                    f"{len(_cust_summary)} customers — avg LTV: "
-                    f"${_cust_summary['ltv_in_window'].mean():.2f}"
+                    f"Only customers whose first purchase was at least {_chosen_window} days ago are included "
+                    f"(mature cohorts). Revenue counted within {_chosen_window} days of first purchase."
                 )
-                _inspect_email = st.selectbox(
-                    "Customer to inspect",
-                    options=_cust_summary["customer_email"].tolist(),
-                    key="ltv_audit_customer",
-                )
+            fig_ltv = px.bar(
+                ltv_df,
+                x="product_name",
+                y="avg_ltv",
+                text="customer_count",
+                labels={"avg_ltv": f"Avg {_window_display} LTV ($)", "product_name": "Entry Product", "customer_count": "Customers"},
+                title=_chart_title,
+            )
+            fig_ltv.update_traces(texttemplate="%{text} customers", textposition="outside")
+            fig_ltv.update_layout(yaxis_tickformat="$,.0f")
+            st.plotly_chart(fig_ltv, use_container_width=True)
 
-                # Full charge history for that customer
-                _cust_charges = _audit_customer_df[
-                    _audit_customer_df["customer_email"] == _inspect_email
-                ].copy()
-                st.dataframe(
-                    _cust_charges,
-                    column_config={
-                        "amount": st.column_config.NumberColumn("Amount", format="$%.2f"),
-                        "refund_amount": st.column_config.NumberColumn("Refund", format="$%.2f"),
-                        "net_amount": st.column_config.NumberColumn("Net", format="$%.2f"),
-                        "counted_in_window": st.column_config.CheckboxColumn("In Window"),
-                    },
-                    use_container_width=True,
-                )
-                render_export_buttons(_audit_raw, "ltv_audit", key_prefix="ltv_audit")
-    else:
-        st.info(
-            "No LTV data available."
-            + (f" Try a smaller window — cohorts need at least {_chosen_window} days to mature." if _chosen_window else "")
+            st.subheader("LTV Details")
+            st.dataframe(
+                ltv_df,
+                column_config={
+                    "avg_entry_price": st.column_config.NumberColumn("Avg Entry Price", format="$%.2f"),
+                    "avg_ltv": st.column_config.NumberColumn(f"Avg {_window_display} LTV", format="$%.2f"),
+                    "total_ltv": st.column_config.NumberColumn("Total LTV", format="$%.2f"),
+                },
+                use_container_width=True,
+            )
+            render_export_buttons(ltv_df, "entry_product_ltv", key_prefix="entry_ltv")
+
+            # Audit expander: consistency check + charge-level detail (computed on open only)
+            with st.expander("Audit — charge-level detail"):
+                _audit_raw = _cached_ltv_audit(ltv_start, ltv_end, _chosen_window)
+                if _audit_raw.empty:
+                    st.info("No charge data available for audit.")
+                else:
+                    # Consistency check: avg_ltv should equal mean of per-customer windowed spend
+                    _per_cust = (
+                        _audit_raw[_audit_raw["counted_in_window"]]
+                        .groupby(["entry_product_name", "customer_email"])["net_amount"]
+                        .sum()
+                        .reset_index()
+                        .groupby("entry_product_name")["net_amount"]
+                        .mean()
+                        .reset_index()
+                        .rename(columns={"entry_product_name": "product_name", "net_amount": "computed_avg"})
+                    )
+                    _merged_check = ltv_df[["product_name", "avg_ltv"]].merge(
+                        _per_cust, on="product_name", how="left"
+                    )
+                    _mismatches = _merged_check[
+                        (_merged_check["computed_avg"] - _merged_check["avg_ltv"]).abs() > 0.01
+                    ]
+                    if not _mismatches.empty:
+                        st.warning(
+                            f"Consistency check failed for {len(_mismatches)} product(s): "
+                            + ", ".join(_mismatches["product_name"].tolist())
+                        )
+                    else:
+                        st.success("Consistency check passed — all avg LTV values verified.")
+
+                    _audit_products = sorted(_audit_raw["entry_product_name"].dropna().unique().tolist())
+                    _audit_product_sel = st.selectbox(
+                        "Entry product to inspect",
+                        options=_audit_products,
+                        key="ltv_audit_product",
+                    )
+                    _audit_customer_df = _audit_raw[_audit_raw["entry_product_name"] == _audit_product_sel]
+
+                    # Per-customer summary for quick scan
+                    _cust_summary = (
+                        _audit_customer_df[_audit_customer_df["counted_in_window"]]
+                        .groupby("customer_email")["net_amount"]
+                        .sum()
+                        .reset_index()
+                        .rename(columns={"net_amount": "ltv_in_window"})
+                        .sort_values("ltv_in_window", ascending=False)
+                    )
+                    st.caption(
+                        f"{len(_cust_summary)} customers — avg LTV: "
+                        f"${_cust_summary['ltv_in_window'].mean():.2f}"
+                    )
+                    _inspect_email = st.selectbox(
+                        "Customer to inspect",
+                        options=_cust_summary["customer_email"].tolist(),
+                        key="ltv_audit_customer",
+                    )
+
+                    # Full charge history for that customer
+                    _cust_charges = _audit_customer_df[
+                        _audit_customer_df["customer_email"] == _inspect_email
+                    ].copy()
+                    st.dataframe(
+                        _cust_charges,
+                        column_config={
+                            "amount": st.column_config.NumberColumn("Amount", format="$%.2f"),
+                            "refund_amount": st.column_config.NumberColumn("Refund", format="$%.2f"),
+                            "net_amount": st.column_config.NumberColumn("Net", format="$%.2f"),
+                            "counted_in_window": st.column_config.CheckboxColumn("In Window"),
+                        },
+                        use_container_width=True,
+                    )
+                    render_export_buttons(_audit_raw, "ltv_audit", key_prefix="ltv_audit")
+        else:
+            st.info(
+                "No LTV data available."
+                + (f" Try a smaller window — cohorts need at least {_chosen_window} days to mature." if _chosen_window else "")
+            )
+
+        st.markdown("---")
+        st.subheader("LTV Progression Over Time")
+        st.caption(
+            "Day 1 = avg first-order spend. Subsequent windows show avg LTV at 15, 30, 60, 90, 120, 150, "
+            "and 180 days after first purchase. Each window only includes customers whose cohort has fully matured."
         )
+        prog_df = _cached_ltv_progression(ltv_start, ltv_end)
+        if selected_products:
+            prog_df = prog_df[prog_df["product_name"].isin(selected_products)]
 
-    st.markdown("---")
-    st.subheader("LTV Progression Over Time")
-    st.caption(
-        "Day 1 = avg first-order spend. Subsequent windows show avg LTV at 15, 30, 60, 90, 120, 150, "
-        "and 180 days after first purchase. Each window only includes customers whose cohort has fully matured."
-    )
-    prog_df = _cached_ltv_progression(ltv_start, ltv_end)
-    if selected_products:
-        prog_df = prog_df[prog_df["product_name"].isin(selected_products)]
+        if _ep_price_products is not None:
+            prog_df = prog_df[prog_df["product_name"].isin(_ep_price_products)]
 
-    if _ep_price_products is not None:
-        prog_df = prog_df[prog_df["product_name"].isin(_ep_price_products)]
+        # avg_entry_price as Day 1 anchor; concat before the matured-cohort windows so the line starts at first-order spend
+        if not ltv_df.empty and "avg_entry_price" in ltv_df.columns:
+            _day1 = ltv_df[["product_name", "avg_entry_price", "customer_count"]].copy()
+            _day1 = _day1.rename(columns={"avg_entry_price": "avg_ltv"})
+            _day1["window_days"] = 1
+            prog_df = pd.concat(
+                [_day1[["window_days", "product_name", "avg_ltv", "customer_count"]], prog_df],
+                ignore_index=True,
+            )
+            prog_df = prog_df.sort_values(["product_name", "window_days"]).reset_index(drop=True)
 
-    # avg_entry_price as Day 1 anchor; concat before the matured-cohort windows so the line starts at first-order spend
-    if not ltv_df.empty and "avg_entry_price" in ltv_df.columns:
-        _day1 = ltv_df[["product_name", "avg_entry_price", "customer_count"]].copy()
-        _day1 = _day1.rename(columns={"avg_entry_price": "avg_ltv"})
-        _day1["window_days"] = 1
-        prog_df = pd.concat(
-            [_day1[["window_days", "product_name", "avg_ltv", "customer_count"]], prog_df],
-            ignore_index=True,
-        )
-        prog_df = prog_df.sort_values(["product_name", "window_days"]).reset_index(drop=True)
+        _prog_tick_vals = [1] + _PROGRESSION_WINDOWS
 
-    _prog_tick_vals = [1] + _PROGRESSION_WINDOWS
+        if not prog_df.empty:
+            fig_prog = px.line(
+                prog_df,
+                x="window_days",
+                y="avg_ltv",
+                color="product_name",
+                markers=True,
+                labels={
+                    "window_days": "Days Since First Purchase",
+                    "avg_ltv": "Avg LTV ($)",
+                    "product_name": "Entry Product",
+                    "customer_count": "Customers",
+                },
+                title="Average LTV Growth by Days Since First Purchase",
+                hover_data={"customer_count": True},
+            )
+            fig_prog.update_layout(
+                xaxis=dict(tickvals=_prog_tick_vals, ticktext=["Day 1"] + [str(w) for w in _PROGRESSION_WINDOWS]),
+                yaxis_tickformat="$,.0f",
+            )
+            st.plotly_chart(fig_prog, use_container_width=True)
 
-    if not prog_df.empty:
-        fig_prog = px.line(
-            prog_df,
-            x="window_days",
-            y="avg_ltv",
-            color="product_name",
-            markers=True,
-            labels={
-                "window_days": "Days Since First Purchase",
-                "avg_ltv": "Avg LTV ($)",
-                "product_name": "Entry Product",
-                "customer_count": "Customers",
-            },
-            title="Average LTV Growth by Days Since First Purchase",
-            hover_data={"customer_count": True},
-        )
-        fig_prog.update_layout(
-            xaxis=dict(tickvals=_prog_tick_vals, ticktext=["Day 1"] + [str(w) for w in _PROGRESSION_WINDOWS]),
-            yaxis_tickformat="$,.0f",
-        )
-        st.plotly_chart(fig_prog, use_container_width=True)
+            pivot = (
+                prog_df.pivot_table(index="product_name", columns="window_days", values="avg_ltv", aggfunc="mean")
+                .rename(columns={1: "Day 1", **{w: f"{w}d" for w in _PROGRESSION_WINDOWS}})
+            )
+            pivot.index.name = "Entry Product"
+            st.dataframe(
+                pivot.style.format("${:,.2f}", na_rep="—"),
+                use_container_width=True,
+            )
+            render_export_buttons(prog_df, "ltv_progression", key_prefix="ltv_prog")
+        else:
+            st.info("Not enough mature cohort data to build a progression chart.")
 
-        pivot = (
-            prog_df.pivot_table(index="product_name", columns="window_days", values="avg_ltv", aggfunc="mean")
-            .rename(columns={1: "Day 1", **{w: f"{w}d" for w in _PROGRESSION_WINDOWS}})
-        )
-        pivot.index.name = "Entry Product"
-        st.dataframe(
-            pivot.style.format("${:,.2f}", na_rep="—"),
-            use_container_width=True,
-        )
-        render_export_buttons(prog_df, "ltv_progression", key_prefix="ltv_prog")
-    else:
-        st.info("Not enough mature cohort data to build a progression chart.")
-
-    render_automate_button("daily_metrics_entry_ltv", "Daily Metrics — Entry Product LTV", _filters_summary, current_filters=_cf)
+        render_automate_button("daily_metrics_entry_ltv", "Daily Metrics — Entry Product LTV", _filters_summary, current_filters=_cf)
 
 # --- Tab 7: Subscription Signups ---
 with tab7:
