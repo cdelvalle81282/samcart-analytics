@@ -132,7 +132,8 @@ _CSS = """
 
 /* ── Buttons ── */
 [data-testid="stButton"] > button,
-[data-testid="stDownloadButton"] > button {
+[data-testid="stDownloadButton"] > button,
+[data-testid="stFormSubmitButton"] > button {
     font-family: 'IBM Plex Mono', monospace !important;
     font-size: 0.88rem !important;
     font-weight: 600 !important;
@@ -148,7 +149,8 @@ _CSS = """
 }
 
 [data-testid="stButton"] > button:hover,
-[data-testid="stDownloadButton"] > button:hover {
+[data-testid="stDownloadButton"] > button:hover,
+[data-testid="stFormSubmitButton"] > button:hover {
     background: #B8FF57 !important;
     color: #07080E !important;
 }
