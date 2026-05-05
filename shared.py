@@ -64,17 +64,8 @@ def render_sync_sidebar() -> None:
 
     st.sidebar.title("SamCart Analytics")
 
-    # Credential check — cached process-wide so it only runs once per server restart
     if not client.api_key or client.api_key == "sc_live_YOUR_KEY_HERE":
         st.sidebar.error("Set your API key in `.streamlit/secrets.toml`")
-    else:
-        status = _cached_credentials_status()
-        if status == "ok":
-            st.sidebar.success("Connected to SamCart")
-        elif status == "invalid":
-            st.sidebar.error("Invalid API key")
-        else:
-            st.sidebar.warning("Could not verify API key.")
 
     # Sync controls (gated by feature:sync_data permission)
     from auth import has_permission
@@ -147,17 +138,6 @@ def load_products():
 @st.cache_data(ttl=300)
 def load_customers():
     return get_cache().get_customers_df()
-
-
-@st.cache_resource
-def _cached_credentials_status() -> str:
-    """Verify API key once per server process — result shared across all sessions."""
-    client = get_client()
-    try:
-        return "ok" if client.verify_credentials() else "invalid"
-    except Exception:
-        logger.exception("API key verification failed")
-        return "error"
 
 
 @st.cache_resource

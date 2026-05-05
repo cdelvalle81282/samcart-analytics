@@ -44,7 +44,7 @@ _CSS = """
 [data-testid="stAppViewContainer"] h2,
 [data-testid="stAppViewContainer"] h3 {
     font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.72rem !important;
+    font-size: 0.80rem !important;
     font-weight: 500 !important;
     letter-spacing: 0.15em !important;
     text-transform: uppercase !important;
@@ -69,11 +69,11 @@ _CSS = """
 [data-testid="stMetricLabel"] span,
 [data-testid="stMetricLabel"] div {
     font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.70rem !important;
+    font-size: 0.80rem !important;
     font-weight: 500 !important;
-    letter-spacing: 0.14em !important;
+    letter-spacing: 0.12em !important;
     text-transform: uppercase !important;
-    color: #8B91B0 !important;
+    color: #BCC4D8 !important;
 }
 
 [data-testid="stMetricValue"] > div {
@@ -87,7 +87,7 @@ _CSS = """
 
 [data-testid="stMetricDelta"] {
     font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.72rem !important;
+    font-size: 0.80rem !important;
 }
 
 /* ── Sidebar ── */
@@ -107,8 +107,8 @@ _CSS = """
 [data-testid="stSidebar"] h2,
 [data-testid="stSidebar"] h3 {
     font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.60rem !important;
-    letter-spacing: 0.18em !important;
+    font-size: 0.76rem !important;
+    letter-spacing: 0.14em !important;
     text-transform: uppercase !important;
     border-bottom: none !important;
     color: #B8FF57 !important;
@@ -117,9 +117,9 @@ _CSS = """
 /* ── Tabs ── */
 [data-testid="stTabs"] button[role="tab"] {
     font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.72rem !important;
+    font-size: 0.82rem !important;
     font-weight: 500 !important;
-    letter-spacing: 0.12em !important;
+    letter-spacing: 0.10em !important;
     text-transform: uppercase !important;
 }
 
@@ -134,14 +134,16 @@ _CSS = """
 [data-testid="stButton"] > button,
 [data-testid="stDownloadButton"] > button {
     font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.72rem !important;
-    font-weight: 500 !important;
-    letter-spacing: 0.10em !important;
+    font-size: 0.88rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.08em !important;
     text-transform: uppercase !important;
     border-radius: 2px !important;
-    border: 1px solid #B8FF57 !important;
+    border: 2px solid #B8FF57 !important;
     color: #B8FF57 !important;
     background: transparent !important;
+    padding: 0.55rem 1.2rem !important;
+    min-height: 2.6rem !important;
     transition: all 0.12s ease !important;
 }
 
@@ -161,9 +163,9 @@ _CSS = """
 [data-testid="stCaptionContainer"] p,
 [data-testid="stCaptionContainer"] span {
     font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.75rem !important;
-    color: #9BA3BE !important;
-    letter-spacing: 0.04em !important;
+    font-size: 0.84rem !important;
+    color: #BCC4D8 !important;
+    letter-spacing: 0.03em !important;
 }
 
 /* ── Dividers ── */
@@ -216,12 +218,13 @@ hr {
 [data-testid="stMultiSelect"] label,
 [data-testid="stDateInput"] label,
 [data-testid="stSlider"] label,
-[data-testid="stRadio"] label {
+[data-testid="stRadio"] label,
+[data-testid="stCheckbox"] label {
     font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.68rem !important;
-    letter-spacing: 0.10em !important;
+    font-size: 0.82rem !important;
+    letter-spacing: 0.08em !important;
     text-transform: uppercase !important;
-    color: #3A3F5C !important;
+    color: #BCC4D8 !important;
 }
 
 /* ── Column gaps ── */
@@ -243,11 +246,11 @@ hr {
 }
 .mc-label {
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.70rem;
+    font-size: 0.80rem;
     font-weight: 500;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: #8B91B0;
+    color: #BCC4D8;
     margin-bottom: 8px;
 }
 .mc-value {
@@ -259,7 +262,7 @@ hr {
 }
 .mc-delta {
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.68rem;
+    font-size: 0.80rem;
     margin-top: 6px;
     letter-spacing: 0.04em;
 }
