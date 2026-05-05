@@ -62,8 +62,10 @@ def _cached_monthly_revenue(orders_df, charges_df):
 
 
 require_auth()
+logger.warning("[PERF] overview after require_auth: %.2fs", time.perf_counter() - _PAGE_T0)
 
 render_sync_sidebar()
+logger.warning("[PERF] overview after render_sync_sidebar: %.2fs", time.perf_counter() - _PAGE_T0)
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Clean Up Old Exports", use_container_width=True):
@@ -77,8 +79,11 @@ st.title("Overview")
 st.caption(f"Revenue, customers, and subscription health at a glance  ·  v{VERSION} · Updated {LAST_UPDATED}")
 
 orders_df = load_orders()
+logger.warning("[PERF] overview after load_orders (%d rows): %.2fs", len(orders_df), time.perf_counter() - _PAGE_T0)
 subs_df = load_subscriptions()
+logger.warning("[PERF] overview after load_subscriptions (%d rows): %.2fs", len(subs_df), time.perf_counter() - _PAGE_T0)
 customers_df = load_customers()
+logger.warning("[PERF] overview after load_customers (%d rows): %.2fs", len(customers_df), time.perf_counter() - _PAGE_T0)
 charges_df = load_charges()
 _t_loaders = time.perf_counter()
 logger.warning("[PERF] overview loaders: %.2fs (orders=%d, charges=%d, subs=%d, customers=%d)",
