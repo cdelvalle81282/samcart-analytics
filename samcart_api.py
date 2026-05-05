@@ -66,7 +66,7 @@ class SamCartClient:
             resp = self.session.get(
                 f"{self.BASE_URL}/customers",
                 params={"limit": 1},
-                timeout=30,
+                timeout=5,
             )
             return resp.status_code == 200
         except requests.RequestException:

@@ -1,7 +1,6 @@
 """SamCart Analytics Dashboard — Overview page."""
 
 import logging
-import time
 
 import pandas as pd
 import plotly.express as px
@@ -22,8 +21,6 @@ from shared import load_charges, load_customers, load_orders, load_subscriptions
 from version import LAST_UPDATED, VERSION
 
 logger = logging.getLogger(__name__)
-
-_PAGE_T0 = time.perf_counter()
 
 
 def _mc(label: str, value: str, delta: str | None = None, neg: bool = False, help_text: str | None = None) -> str:
@@ -62,10 +59,8 @@ def _cached_monthly_revenue(orders_df, charges_df):
 
 
 require_auth()
-logger.warning("[PERF] overview after require_auth: %.2fs", time.perf_counter() - _PAGE_T0)
 
 render_sync_sidebar()
-logger.warning("[PERF] overview after render_sync_sidebar: %.2fs", time.perf_counter() - _PAGE_T0)
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Clean Up Old Exports", use_container_width=True):
@@ -79,15 +74,9 @@ st.title("Overview")
 st.caption(f"Revenue, customers, and subscription health at a glance  ·  v{VERSION} · Updated {LAST_UPDATED}")
 
 orders_df = load_orders()
-logger.warning("[PERF] overview after load_orders (%d rows): %.2fs", len(orders_df), time.perf_counter() - _PAGE_T0)
 subs_df = load_subscriptions()
-logger.warning("[PERF] overview after load_subscriptions (%d rows): %.2fs", len(subs_df), time.perf_counter() - _PAGE_T0)
 customers_df = load_customers()
-logger.warning("[PERF] overview after load_customers (%d rows): %.2fs", len(customers_df), time.perf_counter() - _PAGE_T0)
 charges_df = load_charges()
-_t_loaders = time.perf_counter()
-logger.warning("[PERF] overview loaders: %.2fs (orders=%d, charges=%d, subs=%d, customers=%d)",
-               _t_loaders - _PAGE_T0, len(orders_df), len(charges_df), len(subs_df), len(customers_df))
 
 if orders_df.empty and subs_df.empty:
     st.info("No data yet. Use the **Sync Data** button in the sidebar to fetch data from SamCart.")
@@ -129,7 +118,6 @@ if not customers_df.empty and "created_at" in customers_df.columns:
         if len(_counts) >= 2:
             customers_delta = int(_counts.iloc[-1] - _counts.iloc[-2])
 
-_t_pre_analytics = time.perf_counter()
 nrr_str = "N/A"
 try:
     nrr_df = _cached_nrr(charges_df, subs_df)
@@ -160,8 +148,6 @@ try:
         top10_pct_str = f"{conc_df.iloc[_n - 1]['cumulative_pct']:.1f}%"
 except Exception:
     logger.exception("Concentration computation failed on Overview")
-
-logger.warning("[PERF] overview analytics: %.2fs", time.perf_counter() - _t_pre_analytics)
 
 # ------------------------------------------------------------------
 # Metric cards — 2 rows of 4

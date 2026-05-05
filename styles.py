@@ -73,7 +73,7 @@ _CSS = """
     font-weight: 500 !important;
     letter-spacing: 0.18em !important;
     text-transform: uppercase !important;
-    color: #3A3F5C !important;
+    color: #6B7490 !important;
 }
 
 [data-testid="stMetricValue"] > div {
@@ -162,7 +162,7 @@ _CSS = """
 [data-testid="stCaptionContainer"] span {
     font-family: 'IBM Plex Mono', monospace !important;
     font-size: 0.68rem !important;
-    color: #3A3F5C !important;
+    color: #7B82A0 !important;
     letter-spacing: 0.04em !important;
 }
 
