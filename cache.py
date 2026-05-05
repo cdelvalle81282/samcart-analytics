@@ -592,16 +592,36 @@ class SamCartCache:
     # ------------------------------------------------------------------
 
     def get_orders_df(self) -> pd.DataFrame:
-        return pd.read_sql_query("SELECT * FROM orders ORDER BY created_at DESC", self.conn)
+        return pd.read_sql_query(
+            "SELECT id, customer_email, product_id, product_name, total, created_at, subscription_id"
+            " FROM orders ORDER BY created_at DESC",
+            self.conn,
+        )
 
     def get_subscriptions_df(self) -> pd.DataFrame:
-        return pd.read_sql_query("SELECT * FROM subscriptions ORDER BY created_at DESC", self.conn)
+        return pd.read_sql_query(
+            "SELECT id, customer_email, product_id, product_name, status, interval, price,"
+            " created_at, canceled_at, trial_days"
+            " FROM subscriptions ORDER BY created_at DESC",
+            self.conn,
+        )
 
     def get_customers_df(self) -> pd.DataFrame:
-        return pd.read_sql_query("SELECT * FROM customers ORDER BY created_at DESC", self.conn)
+        # Only id and created_at are used by analytics — PII columns are not
+        # loaded in bulk. Per-customer detail is fetched on demand via
+        # get_customer_orders / get_customer_charges / search_customers.
+        return pd.read_sql_query(
+            "SELECT id, created_at FROM customers ORDER BY created_at DESC",
+            self.conn,
+        )
 
     def get_charges_df(self) -> pd.DataFrame:
-        return pd.read_sql_query("SELECT * FROM charges ORDER BY created_at DESC", self.conn)
+        return pd.read_sql_query(
+            "SELECT id, order_id, subscription_id, customer_email, amount, status,"
+            " created_at, refund_amount, refund_date"
+            " FROM charges ORDER BY created_at DESC",
+            self.conn,
+        )
 
     def get_products_df(self) -> pd.DataFrame:
         return pd.read_sql_query("SELECT * FROM products ORDER BY name", self.conn)
