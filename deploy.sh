@@ -90,6 +90,8 @@ User=deploy
 WorkingDirectory=${APP_DIR}
 Environment=PATH=${APP_DIR}/venv/bin:/usr/bin:/bin
 ExecStart=${APP_DIR}/venv/bin/streamlit run app.py
+ExecStartPost=${APP_DIR}/scripts/warmup.sh
+TimeoutStartSec=120
 Restart=always
 RestartSec=5
 
