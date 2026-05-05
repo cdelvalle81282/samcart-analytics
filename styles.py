@@ -69,11 +69,11 @@ _CSS = """
 [data-testid="stMetricLabel"] span,
 [data-testid="stMetricLabel"] div {
     font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.60rem !important;
+    font-size: 0.70rem !important;
     font-weight: 500 !important;
-    letter-spacing: 0.18em !important;
+    letter-spacing: 0.14em !important;
     text-transform: uppercase !important;
-    color: #6B7490 !important;
+    color: #8B91B0 !important;
 }
 
 [data-testid="stMetricValue"] > div {
@@ -161,8 +161,8 @@ _CSS = """
 [data-testid="stCaptionContainer"] p,
 [data-testid="stCaptionContainer"] span {
     font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.68rem !important;
-    color: #7B82A0 !important;
+    font-size: 0.75rem !important;
+    color: #9BA3BE !important;
     letter-spacing: 0.04em !important;
 }
 
@@ -243,11 +243,11 @@ hr {
 }
 .mc-label {
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.60rem;
+    font-size: 0.70rem;
     font-weight: 500;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: #3A3F5C;
+    color: #8B91B0;
     margin-bottom: 8px;
 }
 .mc-value {
@@ -265,16 +265,16 @@ hr {
 }
 .mc-delta.pos { color: #B8FF57; }
 .mc-delta.neg { color: #FF4D6D; }
-.mc-delta.neu { color: #3A3F5C; }
+.mc-delta.neu { color: #6B7494; }
 .mc-help {
     position: absolute;
     top: 12px; right: 12px;
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.60rem;
-    color: #3A3F5C;
+    font-size: 0.65rem;
+    color: #6B7494;
     cursor: help;
     width: 14px; height: 14px;
-    border: 1px solid #3A3F5C;
+    border: 1px solid #6B7494;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
 }
