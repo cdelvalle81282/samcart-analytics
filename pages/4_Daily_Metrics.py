@@ -345,8 +345,24 @@ with tab5:
 
 # --- Tab 6: Entry Product LTV ---
 with tab6:
-    ltv_start = date_range[0] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else None
-    ltv_end = date_range[1] if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else None
+    _ltv_cohort_col1, _ltv_cohort_col2 = st.columns([3, 1])
+    with _ltv_cohort_col1:
+        _all_time_cohort = st.checkbox(
+            "All-time cohort (recommended for 60d+ windows)",
+            value=True,
+            key="ltv_cohort_all_time",
+        )
+    if _all_time_cohort:
+        ltv_start = None
+        ltv_end = None
+    else:
+        _ltv_range = _ltv_cohort_col2.date_input(
+            "Cohort acquisition range",
+            value=(date_range[0], date_range[1]) if isinstance(date_range, (list, tuple)) and len(date_range) == 2 else (None, None),
+            key="ltv_cohort_range",
+        )
+        ltv_start = _ltv_range[0] if isinstance(_ltv_range, (list, tuple)) and len(_ltv_range) == 2 else None
+        ltv_end = _ltv_range[1] if isinstance(_ltv_range, (list, tuple)) and len(_ltv_range) == 2 else None
 
     if not st.session_state.get("ltv_tab_loaded"):
         st.info("LTV analysis is compute-intensive. Click below to load it.")
