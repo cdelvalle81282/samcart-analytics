@@ -15,6 +15,9 @@ from samcart_api import SamCartClient, normalize_ts, safe_float, safe_int
 
 _ALLOWED_TABLES = frozenset({"orders", "customers", "subscriptions", "charges", "products", "sync_meta", "audit_log", "pii_access_requests"})
 
+# Internal/test accounts excluded from all analytics queries
+_INTERNAL_EMAIL_DOMAIN = "%@optionpit.com"
+
 
 def _validate_table(table_name: str) -> str:
     """Validate table name against whitelist to prevent SQL injection."""
@@ -594,16 +597,18 @@ class SamCartCache:
     def get_orders_df(self) -> pd.DataFrame:
         return pd.read_sql_query(
             "SELECT id, customer_email, customer_id, product_id, product_name, total, created_at, subscription_id"
-            " FROM orders ORDER BY created_at DESC",
+            " FROM orders WHERE customer_email NOT LIKE ? ORDER BY created_at DESC",
             self.conn,
+            params=(_INTERNAL_EMAIL_DOMAIN,),
         )
 
     def get_subscriptions_df(self) -> pd.DataFrame:
         return pd.read_sql_query(
             "SELECT id, customer_email, product_id, product_name, status, interval, price,"
             " created_at, canceled_at, trial_days"
-            " FROM subscriptions ORDER BY created_at DESC",
+            " FROM subscriptions WHERE customer_email NOT LIKE ? ORDER BY created_at DESC",
             self.conn,
+            params=(_INTERNAL_EMAIL_DOMAIN,),
         )
 
     def get_customers_df(self) -> pd.DataFrame:
@@ -611,16 +616,18 @@ class SamCartCache:
         # loaded in bulk. Per-customer detail is fetched on demand via
         # get_customer_orders / get_customer_charges / search_customers.
         return pd.read_sql_query(
-            "SELECT id, created_at FROM customers ORDER BY created_at DESC",
+            "SELECT id, created_at FROM customers WHERE email NOT LIKE ? ORDER BY created_at DESC",
             self.conn,
+            params=(_INTERNAL_EMAIL_DOMAIN,),
         )
 
     def get_charges_df(self) -> pd.DataFrame:
         return pd.read_sql_query(
             "SELECT id, order_id, subscription_id, customer_email, amount, status,"
             " created_at, refund_amount, refund_date"
-            " FROM charges ORDER BY created_at DESC",
+            " FROM charges WHERE customer_email NOT LIKE ? ORDER BY created_at DESC",
             self.conn,
+            params=(_INTERNAL_EMAIL_DOMAIN,),
         )
 
     def get_products_df(self) -> pd.DataFrame:
