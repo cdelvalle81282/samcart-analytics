@@ -926,14 +926,22 @@ def daily_new_to_file(orders_df: pd.DataFrame) -> pd.DataFrame:
 
     df["date"] = df["created_at"].dt.date
 
-    first_order_idx = df.groupby("customer_email")["created_at"].idxmin()
+    # Prefer email as customer key; fall back to customer_id for rows where
+    # email wasn't resolved (empty string collapses all such rows into one).
+    has_email = df["customer_email"].notna() & (df["customer_email"] != "")
+    df["_ckey"] = df["customer_email"].where(
+        has_email, "cid:" + df["customer_id"].fillna("").astype(str)
+    )
+    df = df[df["_ckey"] != "cid:"]  # drop rows with neither email nor customer_id
+
+    first_order_idx = df.groupby("_ckey")["created_at"].idxmin()
     first_orders = df.loc[first_order_idx]
 
     return (
-        first_orders.groupby(["date", "product_id", "product_name"])["customer_email"]
+        first_orders.groupby(["date", "product_id", "product_name"])["_ckey"]
         .nunique()
         .reset_index()
-        .rename(columns={"customer_email": "new_customer_count"})
+        .rename(columns={"_ckey": "new_customer_count"})
     )
 
 

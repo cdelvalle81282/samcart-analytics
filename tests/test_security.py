@@ -159,7 +159,7 @@ class TestFilenameSanitization:
     def test_customer_lookup_uses_clean_filename(self):
         """Verify the call site in Customer Lookup uses non-PII filename."""
 
-        with open("pages/1_Customer_Lookup.py") as f:
+        with open("views/1_Customer_Lookup.py") as f:
             source = f.read()
 
         # The source should contain 'customer_orders' not f"orders_{selected_email}"

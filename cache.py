@@ -593,7 +593,7 @@ class SamCartCache:
 
     def get_orders_df(self) -> pd.DataFrame:
         return pd.read_sql_query(
-            "SELECT id, customer_email, product_id, product_name, total, created_at, subscription_id"
+            "SELECT id, customer_email, customer_id, product_id, product_name, total, created_at, subscription_id"
             " FROM orders ORDER BY created_at DESC",
             self.conn,
         )
