@@ -1,20 +1,21 @@
 """Auto-diagnosis: called by GitHub Actions when health check fails.
 
-Collects context passed via env vars, calls Claude API to diagnose,
+Collects context from a file, calls Claude API to diagnose,
 posts findings as a GitHub issue comment (or creates an issue if none exists).
 
 Required env vars:
   ANTHROPIC_API_KEY
-  GH_TOKEN               — GitHub token (set automatically in Actions)
-  GH_REPO                — owner/repo  (e.g. cdelvalle81282/samcart-analytics)
-  FAILURE_CONTEXT        — JSON string: {checks: [{name, error}], logs: str}
+  GH_TOKEN                — GitHub token (set automatically in Actions)
+  GH_REPO                 — owner/repo  (e.g. cdelvalle81282/samcart-analytics)
+  FAILURE_CONTEXT_PATH    — path to JSON file: {checks: [{name, error}], logs: str}
 
 Optional:
-  ISSUE_NUMBER           — existing issue to comment on (else creates new one)
+  ISSUE_NUMBER            — existing issue to comment on (else creates new one)
 """
 
 import json
 import os
+import re
 import sys
 
 import requests
@@ -35,49 +36,58 @@ When given a health check failure report with server logs, you:
 4. Keep the response under 400 words. Use GitHub-flavored markdown.
 """
 
+# Patterns to strip from logs before they leave the runner (public repo)
+_REDACT_PATTERNS = [
+    (re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"), "[email]"),
+    (re.compile(r"sc-api[^\s\"']*"), "sc-api [REDACTED]"),
+    (re.compile(r"Bearer\s+[A-Za-z0-9_\-.]+"), "Bearer [REDACTED]"),
+    (re.compile(r"sk-ant-[A-Za-z0-9_\-.]+"), "[REDACTED]"),
+]
+
+
+def _redact(text: str) -> str:
+    for pattern, replacement in _REDACT_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
 
 def _format_checks(context: dict) -> tuple[str, str]:
-    """Return (checks_summary markdown, logs string) from a failure context dict."""
+    """Return (checks_summary markdown, redacted logs string)."""
     checks_summary = "\n".join(
         f"- **{c['name']}**: {c['error']}" for c in context.get("checks", [])
     )
-    logs = context.get("logs", "(no logs collected)")
+    logs = _redact(context.get("logs", "(no logs collected)"))
     return checks_summary, logs
 
 
 def call_claude(api_key: str, context: dict) -> str:
     checks_summary, logs = _format_checks(context)
-
-    user_message = f"""## Health Check Failure Report
-
-### Failed checks
-{checks_summary}
-
-### Server logs (last 100 lines)
-```
-{logs[:6000]}
-```
-
-What is the root cause and how should it be fixed?
-"""
-
-    resp = requests.post(
-        ANTHROPIC_API_URL,
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": MODEL,
-            "max_tokens": 1024,
-            "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": user_message}],
-        },
-        timeout=60,
+    user_message = (
+        "## Health Check Failure Report\n\n"
+        f"### Failed checks\n{checks_summary}\n\n"
+        f"### Server logs (last 100 lines)\n```\n{logs[:6000]}\n```\n\n"
+        "What is the root cause and how should it be fixed?"
     )
-    resp.raise_for_status()
-    return resp.json()["content"][0]["text"]
+    try:
+        resp = requests.post(
+            ANTHROPIC_API_URL,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": MODEL,
+                "max_tokens": 1024,
+                "system": SYSTEM_PROMPT,
+                "messages": [{"role": "user", "content": user_message}],
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.json()["content"][0]["text"]
+    except requests.RequestException as exc:
+        raise RuntimeError(type(exc).__name__) from None
 
 
 def gh_headers(token: str) -> dict:
@@ -85,39 +95,39 @@ def gh_headers(token: str) -> dict:
 
 
 def create_issue(token: str, repo: str, context: dict) -> int:
-    checks_summary, logs = _format_checks(context)
-    body = f"""## Automated Health Check Failure
-
-### Failed checks
-{checks_summary}
-
-### Server logs
-```
-{logs[:6000]}
-```
-
-_Created automatically by the health check workflow._
-"""
-    resp = requests.post(
-        f"{GH_API}/repos/{repo}/issues",
-        headers=gh_headers(token),
-        json={"title": "Health check failure", "body": body, "labels": ["health-alert"]},
-        timeout=15,
+    checks_summary, _ = _format_checks(context)
+    body = (
+        "## Automated Health Check Failure\n\n"
+        f"### Failed checks\n{checks_summary}\n\n"
+        "_Server logs are included in the Claude diagnosis comment below._\n\n"
+        "_Created automatically by the health check workflow._"
     )
-    resp.raise_for_status()
+    try:
+        resp = requests.post(
+            f"{GH_API}/repos/{repo}/issues",
+            headers=gh_headers(token),
+            json={"title": "Health check failure", "body": body, "labels": ["health-alert"]},
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        raise RuntimeError(type(exc).__name__) from None
     number = resp.json()["number"]
     print(f"Created issue #{number}")
     return number
 
 
 def post_comment(token: str, repo: str, issue_number: int, body: str) -> None:
-    resp = requests.post(
-        f"{GH_API}/repos/{repo}/issues/{issue_number}/comments",
-        headers=gh_headers(token),
-        json={"body": body},
-        timeout=15,
-    )
-    resp.raise_for_status()
+    try:
+        resp = requests.post(
+            f"{GH_API}/repos/{repo}/issues/{issue_number}/comments",
+            headers=gh_headers(token),
+            json={"body": body},
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        raise RuntimeError(type(exc).__name__) from None
     print(f"Posted comment on issue #{issue_number}")
 
 
@@ -125,19 +135,28 @@ def main() -> int:
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     gh_token = os.environ.get("GH_TOKEN", "")
     repo = os.environ.get("GH_REPO", "")
-    raw_context = os.environ.get("FAILURE_CONTEXT", "{}")
     issue_number_env = os.environ.get("ISSUE_NUMBER", "")
 
+    ctx_path = os.environ.get("FAILURE_CONTEXT_PATH", "")
+    if not ctx_path:
+        print("FAILURE_CONTEXT_PATH not set", file=sys.stderr)
+        return 1
     try:
-        context = json.loads(raw_context)
-    except json.JSONDecodeError:
-        context = {"checks": [], "logs": raw_context}
+        with open(ctx_path) as f:
+            context = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Failed to read context: {type(exc).__name__}", file=sys.stderr)
+        return 1
 
     # Create or reuse issue
     if issue_number_env:
-        issue_number = int(issue_number_env)
+        issue_number: int | None = int(issue_number_env)
     elif gh_token and repo:
-        issue_number = create_issue(gh_token, repo, context)
+        try:
+            issue_number = create_issue(gh_token, repo, context)
+        except RuntimeError as exc:
+            print(f"Issue creation failed: {exc}", file=sys.stderr)
+            issue_number = None
     else:
         print("No GH_TOKEN/GH_REPO — skipping issue creation")
         issue_number = None
@@ -152,12 +171,12 @@ def main() -> int:
                 post_comment(gh_token, repo, issue_number, comment)
             else:
                 print(comment)
-        except Exception as exc:
+        except RuntimeError as exc:
             print(f"Diagnosis failed: {exc}", file=sys.stderr)
     else:
         print("ANTHROPIC_API_KEY not set — skipping auto-diagnosis.")
         if issue_number:
-            print(f"Issue #{issue_number} created with logs. Open Claude Code and run: investigate issue #{issue_number}")
+            print(f"Issue #{issue_number} created. Open Claude Code and investigate issue #{issue_number}")
 
     return 0
 

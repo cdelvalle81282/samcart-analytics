@@ -14,13 +14,25 @@ Flags:
 import json
 import os
 import sys
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-APP_URL = os.environ.get("APP_URL", "https://opisamcart.duckdns.org")
+_ALLOWED_APP_HOSTS = {"opisamcart.duckdns.org"}
 SAMCART_API_BASE = "https://api.samcart.com/v1"
 TIMEOUT = 15
+
+
+def _validated_app_url() -> str:
+    url = os.environ.get("APP_URL", "https://opisamcart.duckdns.org")
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or parsed.hostname not in _ALLOWED_APP_HOSTS:
+        raise SystemExit(f"APP_URL not in allowlist: {url}")
+    return url
+
+
+APP_URL = _validated_app_url()
 
 
 def check_dashboard() -> tuple[str, str | None]:
@@ -80,8 +92,8 @@ def send_slack_alert(bot_token: str, channel: str, failures: list[str]) -> None:
         data = resp.json()
         if not data.get("ok"):
             print(f"Slack error: {data.get('error', 'unknown')}", file=sys.stderr)
-    except Exception as exc:
-        print(f"Failed to send Slack alert: {exc}", file=sys.stderr)
+    except requests.RequestException as exc:
+        print(f"Failed to send Slack alert: {type(exc).__name__}", file=sys.stderr)
 
 
 def run_checks(api_key: str) -> list[tuple[str, str | None]]:
