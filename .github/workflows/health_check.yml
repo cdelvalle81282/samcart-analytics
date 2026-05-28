@@ -10,6 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - name: Run health checks
+        env:
+          SAMCART_API_KEY: ${{ secrets.SAMCART_API_KEY }}
+        run: python scripts/health_check.py
+
+  diagnose:
+    runs-on: ubuntu-latest
+    needs: health-check
+    if: failure()
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
@@ -17,9 +32,41 @@ jobs:
 
       - run: pip install requests
 
-      - name: Check dashboard and SamCart API
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H 167.99.167.244 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Collect server logs
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no deploy@167.99.167.244 \
+            "journalctl -u samcart-analytics --no-pager -n 100 --output=short-precise; \
+             echo '--- disk ---'; df -h /; \
+             echo '--- memory ---'; free -h; \
+             echo '--- service ---'; systemctl status samcart-analytics --no-pager -l" \
+            2>&1 > /tmp/server_logs.txt \
+            || echo "(SSH failed — droplet may be unreachable)" > /tmp/server_logs.txt
+
+          python3 - <<'EOF'
+          import json
+          with open("/tmp/server_logs.txt") as f:
+              logs = f.read()
+          ctx = json.dumps({
+              "checks": [{"name": "dashboard+api", "error": "health check failed — see logs"}],
+              "logs": logs,
+          })
+          with open("/tmp/failure_context.json", "w") as f:
+              f.write(ctx)
+          EOF
+
+      - name: Diagnose and create GitHub issue
         env:
-          SAMCART_API_KEY: ${{ secrets.SAMCART_API_KEY }}
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_ALERT_CHANNEL: ${{ secrets.SLACK_ALERT_CHANNEL }}
-        run: python scripts/health_check.py
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          FAILURE_CONTEXT_FILE: /tmp/failure_context.json
+        run: |
+          export FAILURE_CONTEXT=$(cat /tmp/failure_context.json)
+          python scripts/diagnose.py
