@@ -21,6 +21,7 @@ import requests
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 GH_API = "https://api.github.com"
+MODEL = "claude-opus-4-7"
 
 SYSTEM_PROMPT = """\
 You are an on-call SRE assistant for a Streamlit analytics dashboard deployed on a DigitalOcean droplet.
@@ -35,11 +36,17 @@ When given a health check failure report with server logs, you:
 """
 
 
-def call_claude(api_key: str, context: dict) -> str:
+def _format_checks(context: dict) -> tuple[str, str]:
+    """Return (checks_summary markdown, logs string) from a failure context dict."""
     checks_summary = "\n".join(
         f"- **{c['name']}**: {c['error']}" for c in context.get("checks", [])
     )
     logs = context.get("logs", "(no logs collected)")
+    return checks_summary, logs
+
+
+def call_claude(api_key: str, context: dict) -> str:
+    checks_summary, logs = _format_checks(context)
 
     user_message = f"""## Health Check Failure Report
 
@@ -62,7 +69,7 @@ What is the root cause and how should it be fixed?
             "content-type": "application/json",
         },
         json={
-            "model": "claude-opus-4-7",
+            "model": MODEL,
             "max_tokens": 1024,
             "system": SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": user_message}],
@@ -78,10 +85,7 @@ def gh_headers(token: str) -> dict:
 
 
 def create_issue(token: str, repo: str, context: dict) -> int:
-    checks_summary = "\n".join(
-        f"- **{c['name']}**: {c['error']}" for c in context.get("checks", [])
-    )
-    logs = context.get("logs", "(no logs collected)")
+    checks_summary, logs = _format_checks(context)
     body = f"""## Automated Health Check Failure
 
 ### Failed checks

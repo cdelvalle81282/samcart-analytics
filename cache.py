@@ -18,6 +18,15 @@ _ALLOWED_TABLES = frozenset({"orders", "customers", "subscriptions", "charges", 
 # Internal/test accounts excluded from all analytics queries
 _INTERNAL_EMAIL_DOMAIN = "%@optionpit.com"
 _INTERNAL_EMAIL_EXACT = {"charles.delvalle@gmail.com"}
+_INTERNAL_EMAIL_PH = ",".join("?" * len(_INTERNAL_EMAIL_EXACT))
+
+
+def _exclusion_where(col: str) -> tuple[str, list]:
+    """Return (WHERE clause fragment, params) for excluding internal emails."""
+    return (
+        f"{col} NOT LIKE ? AND {col} NOT IN ({_INTERNAL_EMAIL_PH})",
+        [_INTERNAL_EMAIL_DOMAIN, *_INTERNAL_EMAIL_EXACT],
+    )
 
 
 def _validate_table(table_name: str) -> str:
@@ -596,48 +605,39 @@ class SamCartCache:
     # ------------------------------------------------------------------
 
     def get_orders_df(self) -> pd.DataFrame:
-        ph = ",".join("?" * len(_INTERNAL_EMAIL_EXACT))
+        clause, params = _exclusion_where("customer_email")
         return pd.read_sql_query(
             f"SELECT id, customer_email, customer_id, product_id, product_name, total, created_at, subscription_id"
-            f" FROM orders WHERE customer_email NOT LIKE ? AND customer_email NOT IN ({ph})"
-            f" ORDER BY created_at DESC",
-            self.conn,
-            params=[_INTERNAL_EMAIL_DOMAIN, *_INTERNAL_EMAIL_EXACT],
+            f" FROM orders WHERE {clause} ORDER BY created_at DESC",
+            self.conn, params=params,
         )
 
     def get_subscriptions_df(self) -> pd.DataFrame:
-        ph = ",".join("?" * len(_INTERNAL_EMAIL_EXACT))
+        clause, params = _exclusion_where("customer_email")
         return pd.read_sql_query(
             f"SELECT id, customer_email, product_id, product_name, status, interval, price,"
             f" created_at, canceled_at, trial_days"
-            f" FROM subscriptions WHERE customer_email NOT LIKE ? AND customer_email NOT IN ({ph})"
-            f" ORDER BY created_at DESC",
-            self.conn,
-            params=[_INTERNAL_EMAIL_DOMAIN, *_INTERNAL_EMAIL_EXACT],
+            f" FROM subscriptions WHERE {clause} ORDER BY created_at DESC",
+            self.conn, params=params,
         )
 
     def get_customers_df(self) -> pd.DataFrame:
         # Only id and created_at are used by analytics — PII columns are not
         # loaded in bulk. Per-customer detail is fetched on demand via
         # get_customer_orders / get_customer_charges / search_customers.
-        ph = ",".join("?" * len(_INTERNAL_EMAIL_EXACT))
+        clause, params = _exclusion_where("email")
         return pd.read_sql_query(
-            f"SELECT id, created_at FROM customers"
-            f" WHERE email NOT LIKE ? AND email NOT IN ({ph})"
-            f" ORDER BY created_at DESC",
-            self.conn,
-            params=[_INTERNAL_EMAIL_DOMAIN, *_INTERNAL_EMAIL_EXACT],
+            f"SELECT id, created_at FROM customers WHERE {clause} ORDER BY created_at DESC",
+            self.conn, params=params,
         )
 
     def get_charges_df(self) -> pd.DataFrame:
-        ph = ",".join("?" * len(_INTERNAL_EMAIL_EXACT))
+        clause, params = _exclusion_where("customer_email")
         return pd.read_sql_query(
             f"SELECT id, order_id, subscription_id, customer_email, amount, status,"
             f" created_at, refund_amount, refund_date"
-            f" FROM charges WHERE customer_email NOT LIKE ? AND customer_email NOT IN ({ph})"
-            f" ORDER BY created_at DESC",
-            self.conn,
-            params=[_INTERNAL_EMAIL_DOMAIN, *_INTERNAL_EMAIL_EXACT],
+            f" FROM charges WHERE {clause} ORDER BY created_at DESC",
+            self.conn, params=params,
         )
 
     def get_products_df(self) -> pd.DataFrame:
