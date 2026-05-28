@@ -1,0 +1,25 @@
+name: Health Check
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install requests
+
+      - name: Check dashboard and SamCart API
+        env:
+          SAMCART_API_KEY: ${{ secrets.SAMCART_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_ALERT_CHANNEL: ${{ secrets.SLACK_ALERT_CHANNEL }}
+        run: python scripts/health_check.py
