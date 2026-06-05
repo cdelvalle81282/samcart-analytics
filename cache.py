@@ -8,7 +8,7 @@ from datetime import date, datetime, time as _dt_time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-import streamlit as st
+# streamlit is imported lazily inside non-headless branches only
 
 from samcart_api import SamCartClient, normalize_ts, safe_float, safe_int
 
@@ -414,6 +414,7 @@ class SamCartCache:
             if headless:
                 print(progress_text)
             else:
+                import streamlit as st
                 st.text(progress_text)
 
         if since is not None:
@@ -475,6 +476,7 @@ class SamCartCache:
         if headless:
             print("Starting sync...")
         else:
+            import streamlit as st
             progress = st.progress(0, text="Starting sync...")
         total_records = 0
 
@@ -563,6 +565,7 @@ class SamCartCache:
         if headless:
             print(f"Today's sync (since {midnight_et.strftime('%Y-%m-%d %H:%M %Z')})...")
         else:
+            import streamlit as st
             progress = st.progress(0, text="Syncing today's customers...")
 
         def _timed_today(label, pct, sync_fn):
