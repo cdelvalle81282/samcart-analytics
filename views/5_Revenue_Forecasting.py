@@ -75,20 +75,17 @@ with tab1:
         # Summary metrics — 2 rows of 3 so values don't truncate
         latest = waterfall_df.iloc[-1]
         _qr = latest.get("quick_ratio", float("nan"))
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Latest Net MRR", f"${latest['net_mrr']:,.0f}",
-                  help="New + Expansion + Reactivation MRR minus Churned MRR.")
-        m2.metric("New MRR", f"${latest['new_mrr']:,.0f}",
-                  help="Revenue from first-time subscribers to each product.")
-        m3.metric("Expansion MRR", f"${latest['expansion_mrr']:,.0f}",
-                  help="New subscriptions from customers who already have an active subscription to a different product.")
-        m4, m5, m6 = st.columns(3)
-        m4.metric("Churned MRR", f"${latest['churned_mrr']:,.0f}",
-                  help="Revenue lost from canceled subscriptions.")
-        m5.metric("Reactivation MRR", f"${latest['reactivation_mrr']:,.0f}",
-                  help="Revenue from customers who re-subscribed after a prior cancellation.")
-        m6.metric("Quick Ratio", f"{_qr:.2f}" if pd.notna(_qr) else "N/A",
-                  help="(New + Expansion + Reactivation) / Churned MRR. >1 = growing. >4 = excellent.")
+        _mrr_metrics = [
+            ("Latest Net MRR", f"${latest['net_mrr']:,.0f}", "New + Expansion + Reactivation MRR minus Churned MRR."),
+            ("New MRR", f"${latest['new_mrr']:,.0f}", "Revenue from first-time subscribers to each product."),
+            ("Expansion MRR", f"${latest['expansion_mrr']:,.0f}", "New subscriptions from customers who already have an active subscription to a different product."),
+            ("Churned MRR", f"${latest['churned_mrr']:,.0f}", "Revenue lost from canceled subscriptions."),
+            ("Reactivation MRR", f"${latest['reactivation_mrr']:,.0f}", "Revenue from customers who re-subscribed after a prior cancellation."),
+            ("Quick Ratio", f"{_qr:.2f}" if pd.notna(_qr) else "N/A", "(New + Expansion + Reactivation) / Churned MRR. >1 = growing. >4 = excellent."),
+        ]
+        for row_metrics in (_mrr_metrics[:3], _mrr_metrics[3:]):
+            for col, (label, value, help_text) in zip(st.columns(3), row_metrics):
+                col.metric(label, value, help=help_text)
 
         # Stacked bar chart with expansion
         fig = go.Figure()

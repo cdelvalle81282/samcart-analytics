@@ -77,11 +77,16 @@ def _migrate_from_secrets(db: AuthDB) -> None:
 # ── Auth Gate ─────────────────────────────────────────────────────────────────
 
 
-def _logout() -> None:
+def logout() -> None:
     """Clear all auth session state keys and rerun the app."""
     for key in _AUTH_SESSION_KEYS:
         st.session_state.pop(key, None)
     st.rerun()
+
+
+def is_authenticated() -> bool:
+    """Return True if the current session has a valid authenticated user."""
+    return st.session_state.get("authentication_status") is True
 
 
 def require_auth() -> None:
@@ -93,13 +98,13 @@ def require_auth() -> None:
     auth_db = get_auth_db()
 
     # ── Already authenticated ──────────────────────────────────────────
-    if st.session_state.get("authentication_status") is True:
+    if is_authenticated():
         # Enforce absolute session expiry
         login_at_str = st.session_state.get("login_at")
         if login_at_str:
             age = datetime.utcnow() - datetime.fromisoformat(login_at_str)
             if age > timedelta(hours=_SESSION_MAX_HOURS):
-                _logout()
+                logout()
                 st.warning("Your session has expired. Please log in again.")
                 st.stop()
         return
@@ -141,11 +146,6 @@ def require_auth() -> None:
             st.error("Username or password is incorrect.")
 
     st.stop()
-
-
-def logout() -> None:
-    """Public entry point for logout — call from sidebar UI."""
-    _logout()
 
 
 # ── Permission Helpers ────────────────────────────────────────────────────────

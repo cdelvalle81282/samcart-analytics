@@ -5,9 +5,9 @@ import os
 
 import streamlit as st
 
+from auth import has_permission, is_authenticated, logout
 from cache import SamCartCache
 from samcart_api import SamCartAPIError, SamCartClient
-from styles import inject_styles
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +57,6 @@ def render_sync_sidebar() -> None:
 
     Safe to call from any page — uses the shared singleton client/cache.
     """
-    from auth import has_permission, logout
-
-    inject_styles()
-
     client = get_client()
     cache = get_cache()
 
@@ -110,7 +106,7 @@ def render_sync_sidebar() -> None:
             st.sidebar.caption(f"**{table}**: {count:,} records (synced {last[:16]})")
 
     # Logout — always at bottom so branding/sync controls stay at top
-    if st.session_state.get("authentication_status") is True:
+    if is_authenticated():
         st.sidebar.markdown("---")
         if st.sidebar.button("Logout", use_container_width=True):
             logout()
