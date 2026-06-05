@@ -72,20 +72,21 @@ with tab1:
     if waterfall_df.empty:
         st.warning("No MRR data available.")
     else:
-        # Summary metrics — 5 columns: net, new, expansion, churn, reactivation, quick ratio
+        # Summary metrics — 2 rows of 3 so values don't truncate
         latest = waterfall_df.iloc[-1]
-        m1, m2, m3, m4, m5, m6 = st.columns(6)
-        m1.metric("Latest Net MRR", f"${latest['net_mrr']:,.2f}",
-                  help="New + Expansion + Reactivation MRR minus Churned MRR.")
-        m2.metric("New MRR", f"${latest['new_mrr']:,.2f}",
-                  help="Revenue from first-time subscribers to each product.")
-        m3.metric("Expansion MRR", f"${latest['expansion_mrr']:,.2f}",
-                  help="New subscriptions from customers who already have an active subscription to a different product.")
-        m4.metric("Churned MRR", f"${latest['churned_mrr']:,.2f}",
-                  help="Revenue lost from canceled subscriptions.")
-        m5.metric("Reactivation MRR", f"${latest['reactivation_mrr']:,.2f}",
-                  help="Revenue from customers who re-subscribed after a prior cancellation.")
         _qr = latest.get("quick_ratio", float("nan"))
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Latest Net MRR", f"${latest['net_mrr']:,.0f}",
+                  help="New + Expansion + Reactivation MRR minus Churned MRR.")
+        m2.metric("New MRR", f"${latest['new_mrr']:,.0f}",
+                  help="Revenue from first-time subscribers to each product.")
+        m3.metric("Expansion MRR", f"${latest['expansion_mrr']:,.0f}",
+                  help="New subscriptions from customers who already have an active subscription to a different product.")
+        m4, m5, m6 = st.columns(3)
+        m4.metric("Churned MRR", f"${latest['churned_mrr']:,.0f}",
+                  help="Revenue lost from canceled subscriptions.")
+        m5.metric("Reactivation MRR", f"${latest['reactivation_mrr']:,.0f}",
+                  help="Revenue from customers who re-subscribed after a prior cancellation.")
         m6.metric("Quick Ratio", f"{_qr:.2f}" if pd.notna(_qr) else "N/A",
                   help="(New + Expansion + Reactivation) / Churned MRR. >1 = growing. >4 = excellent.")
 

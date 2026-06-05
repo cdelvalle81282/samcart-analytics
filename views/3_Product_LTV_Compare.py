@@ -88,17 +88,28 @@ if ranking.empty:
 # ------------------------------------------------------------------
 
 st.subheader("Products by Total Revenue")
+_CHART_LIMIT = 25
+_chart_data = ranking.head(_CHART_LIMIT)
+if len(ranking) > _CHART_LIMIT:
+    st.caption(f"Showing top {_CHART_LIMIT} of {len(ranking)} products by revenue. See the table below for all.")
 fig = px.bar(
-    ranking,
-    x="product_name",
-    y="total_revenue",
+    _chart_data,
+    y="product_name",
+    x="total_revenue",
     text="order_count",
+    orientation="h",
     labels={"total_revenue": "Total Revenue ($)", "product_name": "Product", "order_count": "Orders"},
     color="total_revenue",
-    color_continuous_scale="Blues",
+    color_continuous_scale="Teal",
 )
 fig.update_traces(texttemplate="%{text} orders", textposition="outside")
-fig.update_layout(yaxis_tickformat="$,.0f", showlegend=False)
+fig.update_layout(
+    xaxis_tickformat="$,.0f",
+    showlegend=False,
+    yaxis={"autorange": "reversed"},
+    height=max(400, len(_chart_data) * 32),
+    margin={"l": 10, "r": 80, "t": 20, "b": 20},
+)
 st.plotly_chart(fig, use_container_width=True)
 
 # ------------------------------------------------------------------

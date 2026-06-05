@@ -57,6 +57,8 @@ def render_sync_sidebar() -> None:
 
     Safe to call from any page — uses the shared singleton client/cache.
     """
+    from auth import has_permission, logout
+
     inject_styles()
 
     client = get_client()
@@ -68,8 +70,6 @@ def render_sync_sidebar() -> None:
         st.sidebar.error("Set your API key in `.streamlit/secrets.toml`")
 
     # Sync controls (gated by feature:sync_data permission)
-    from auth import has_permission
-
     if has_permission("feature:sync_data"):
         st.sidebar.markdown("---")
         st.sidebar.subheader("Data Sync")
@@ -108,6 +108,12 @@ def render_sync_sidebar() -> None:
             last = meta["last_synced_at"] or "Never"
             count = meta["record_count"] or 0
             st.sidebar.caption(f"**{table}**: {count:,} records (synced {last[:16]})")
+
+    # Logout — always at bottom so branding/sync controls stay at top
+    if st.session_state.get("authentication_status") is True:
+        st.sidebar.markdown("---")
+        if st.sidebar.button("Logout", use_container_width=True):
+            logout()
 
 
 # ------------------------------------------------------------------

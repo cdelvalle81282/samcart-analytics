@@ -156,6 +156,8 @@ else:
     st.subheader("Top Customers by LTV")
     ltv_df = _cached_ltv()
     if not ltv_df.empty:
+        if len(ltv_df) > 50:
+            st.caption(f"Showing top 50 of {len(ltv_df):,} customers by lifetime value. Search above to find a specific customer.")
         st.dataframe(
             ltv_df.head(50),
             column_config={

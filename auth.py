@@ -102,9 +102,6 @@ def require_auth() -> None:
                 _logout()
                 st.warning("Your session has expired. Please log in again.")
                 st.stop()
-        with st.sidebar:
-            if st.button("Logout"):
-                _logout()
         return
 
     # ── Not authenticated — show login form ────────────────────────────
@@ -144,6 +141,11 @@ def require_auth() -> None:
             st.error("Username or password is incorrect.")
 
     st.stop()
+
+
+def logout() -> None:
+    """Public entry point for logout — call from sidebar UI."""
+    _logout()
 
 
 # ── Permission Helpers ────────────────────────────────────────────────────────

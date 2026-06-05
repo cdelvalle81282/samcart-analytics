@@ -1,12 +1,15 @@
 """SamCart Analytics — navigation entry point."""
 
 import streamlit as st
+from styles import inject_styles
 
 st.set_page_config(
     page_title="SamCart Analytics",
     page_icon=":bar_chart:",
     layout="wide",
 )
+
+inject_styles()
 
 pg = st.navigation(
     {
