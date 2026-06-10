@@ -431,6 +431,14 @@ class SamCartCache:
             # Replace full-sync tables atomically so failures preserve prior data.
             try:
                 self.conn.execute("BEGIN")
+                # For charges: back up refund data so a _sync_refunds failure later
+                # doesn't wipe already-known refund amounts from the DB.
+                if table_name == "charges":
+                    self.conn.execute(
+                        "CREATE TEMP TABLE _charge_refund_backup AS "
+                        "SELECT id, refund_amount, refund_date FROM charges "
+                        "WHERE refund_amount IS NOT NULL OR refund_date IS NOT NULL"
+                    )
                 self.conn.execute(f"DELETE FROM [{table_name}]")
                 for i in range(0, len(records), batch_size):
                     batch = records[i : i + batch_size]
@@ -438,11 +446,22 @@ class SamCartCache:
                         upserter(batch, customer_map=customer_map)
                     else:
                         upserter(batch)
+                if table_name == "charges":
+                    # UPDATE ... FROM is supported in SQLite ≥ 3.33 (Python 3.12 ships ≥ 3.39)
+                    self.conn.execute(
+                        "UPDATE charges "
+                        "SET refund_amount = b.refund_amount, "
+                        "    refund_date   = b.refund_date "
+                        "FROM _charge_refund_backup b "
+                        "WHERE charges.id = b.id"
+                    )
                 self._update_sync_meta(table_name, commit=False)
                 self.conn.commit()
             except Exception:
                 self.conn.rollback()
                 raise
+            finally:
+                self.conn.execute("DROP TABLE IF EXISTS _charge_refund_backup")
         else:
             if records:
                 # Commit per batch for crash safety on incremental syncs.

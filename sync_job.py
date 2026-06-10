@@ -43,7 +43,9 @@ def main():
     print(f"Synced {total:,} records")
 
     # Checkpoint WAL so all data is in the main .db file for git commit
-    cache.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    wal_result = cache.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    if wal_result and wal_result[0] == 1:
+        print("WARNING: WAL checkpoint incomplete (busy) — WAL file may not be fully flushed", file=sys.stderr)
     cache.conn.close()
 
 

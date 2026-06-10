@@ -10,9 +10,9 @@ import pandas as pd
 ET = ZoneInfo("America/New_York")
 
 
-def to_eastern(series: pd.Series) -> pd.Series:
+def to_eastern(series: pd.Series, *, errors: str = "raise") -> pd.Series:
     """Convert a UTC datetime series to Eastern time."""
-    return pd.to_datetime(series, utc=True).dt.tz_convert(ET)
+    return pd.to_datetime(series, utc=True, errors=errors).dt.tz_convert(ET)
 
 
 # Keep backward-compatible alias (internal callers use the old name)
@@ -33,7 +33,8 @@ def _is_successful_charge(status_series: pd.Series) -> pd.Series:
 
 def _is_refund_charge(status_series: pd.Series) -> pd.Series:
     """A charge is a refund if status is in the refund set."""
-    return status_series.str.lower().isin(REFUND_CHARGE_STATUSES)
+    lower = status_series.fillna("").str.lower().str.strip()
+    return lower.isin(REFUND_CHARGE_STATUSES)
 
 
 # Collected = money was collected (includes partially refunded at reduced amount)
@@ -319,7 +320,10 @@ def build_cohort_performance(
     activity["cumulative_revenue"] = activity["period_revenue"].cumsum()
 
     # --- 9. Build renewal rates (periods > 0 only) ---
-    cohort_size = activity.loc[activity["period"] == 0, "active_subscribers"].iloc[0]
+    period_0_rows = activity.loc[activity["period"] == 0, "active_subscribers"]
+    if period_0_rows.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    cohort_size = period_0_rows.iloc[0]
 
     renewal_rows = []
     for i, period in enumerate(periods):
@@ -539,7 +543,7 @@ def product_ltv_ranking(
     if not subscriptions_df.empty:
         subs = subscriptions_df.copy()
         subs["created_at"] = _to_eastern(subs["created_at"])
-        subs["canceled_at"] = pd.to_datetime(subs["canceled_at"], utc=True).dt.tz_convert(ET)
+        subs["canceled_at"] = _to_eastern(subs["canceled_at"], errors="coerce")
         now = pd.Timestamp(datetime.now(ET))
         subs["end_date"] = subs["canceled_at"].fillna(now)
         subs["lifetime_months"] = (

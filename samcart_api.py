@@ -115,9 +115,8 @@ class SamCartClient:
         # First request uses the endpoint + params
         data = self._request(endpoint, params)
         items = data.get("data", [])
-        if not items:
-            return all_items
-        all_items.extend(items)
+        if items:
+            all_items.extend(items)
 
         # Follow cursor-based pagination via 'next' URL
         while True:
@@ -134,7 +133,10 @@ class SamCartClient:
             data = self._request(next_endpoint, next_params)
             items = data.get("data", [])
             if not items:
-                break
+                # Empty page — only stop if the new response has no further cursor
+                if not data.get("pagination", {}).get("next"):
+                    break
+                continue
             all_items.extend(items)
 
         return all_items

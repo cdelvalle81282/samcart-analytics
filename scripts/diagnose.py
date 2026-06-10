@@ -22,7 +22,7 @@ import requests
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 GH_API = "https://api.github.com"
-MODEL = "claude-opus-4-7"
+MODEL = "claude-opus-4-8"
 
 SYSTEM_PROMPT = """\
 You are an on-call SRE assistant for a Streamlit analytics dashboard deployed on a DigitalOcean droplet.

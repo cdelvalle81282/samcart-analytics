@@ -14,6 +14,7 @@ Flags:
 import json
 import os
 import sys
+import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -75,6 +76,18 @@ def check_samcart_api(api_key: str) -> tuple[str, str | None]:
         return "samcart_api", type(exc).__name__
 
 
+def _with_retry(fn, *, attempts: int = 2, delay: float = 5) -> tuple[str, str | None]:
+    """Call fn() up to `attempts` times, returning on first success."""
+    result: tuple[str, str | None] = ("unknown", "never ran")
+    for i in range(attempts):
+        if i:
+            time.sleep(delay)
+        result = fn()
+        if result[1] is None:
+            return result
+    return result
+
+
 def send_slack_alert(bot_token: str, channel: str, failures: list[str]) -> None:
     lines = "\n".join(failures)
     payload = {
@@ -97,16 +110,21 @@ def send_slack_alert(bot_token: str, channel: str, failures: list[str]) -> None:
 
 
 def run_checks(api_key: str) -> list[tuple[str, str | None]]:
-    """Run both checks concurrently. Returns list of (name, error_or_None)."""
+    """Run both checks concurrently with retry. Returns list of (name, error_or_None)."""
     fns = [
-        lambda: check_dashboard(),
+        check_dashboard,
         lambda: check_samcart_api(api_key),
     ]
+    _names = ("dashboard", "samcart_api")
     results = [None, None]
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = {pool.submit(fn): i for i, fn in enumerate(fns)}
+        futures = {pool.submit(_with_retry, fn): i for i, fn in enumerate(fns)}
         for future in as_completed(futures):
-            results[futures[future]] = future.result()
+            idx = futures[future]
+            try:
+                results[idx] = future.result()
+            except Exception as exc:
+                results[idx] = (_names[idx], type(exc).__name__)
     return results
 
 
